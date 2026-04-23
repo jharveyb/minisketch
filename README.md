@@ -203,6 +203,12 @@ $ gcc -std=c99 -Wall -Wextra -o example ./doc/example.c -Lsrc/ -lminisketch -lst
 
 The order of the output is arbitrary and will differ on different runs of minisketch_decode().
 
+## Benchmarking
+
+The `bench` binary (built at `build/bin/bench`) measures the `minisketch_add_uint64` add-path ("create") and `minisketch_decode` recovery-path ("recover") across field sizes, capacities, error counts, and implementations.
+
+Check `doc/BENCHMARKING.md` for more info.
+
 ## Applications
 
 Communications efficient set reconciliation has been proposed to optimize Bitcoin transaction distribution<sup>[[8]](#myfootnote8)</sup>, which would allow Bitcoin nodes to have many more peers while reducing bandwidth usage. It could also be used for Bitcoin block distribution<sup>[[9]](#myfootnote9)</sup>, particularly for very low bandwidth links such as satellite.  A similar approach (CPISync) is used by PGP SKS keyservers to synchronize their databases efficiently. Secure sketches can also be used as helper data to reliably extract a consistent cryptographic key from fuzzy biometric data while leaking minimal information<sup>[[1]](#myfootnote1)</sup>. They can be combined with [dcnets](https://en.wikipedia.org/wiki/Dining_cryptographers_problem) to create cryptographic multiparty anonymous communication<sup>[[10]](#myfootnote10)</sup>.
