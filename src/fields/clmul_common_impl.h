@@ -28,39 +28,65 @@ namespace {
 #  define NO_SANITIZE_MEMORY
 #endif
 
+// Thin portability layer over the carryless-multiply primitive. MulWithClMulReduce
+// and MulTrinomial below are written against this API; adding a new ISA amounts to
+// supplying a new body for each wrapper.
+//
+// Two type aliases are exposed:
+//   Clmul128  — 128-bit in-flight data (inputs to XOR, OR, and the lane shifts).
+//   ClmulPoly — the type a PMULL/PCLMULQDQ operand wants. On x86 this coincides
+//               with Clmul128; a future ARM backend would alias it to poly64x2_t
+//               so vmull_p64 reads naturally. ClmulAsPoly is the zero-cost
+//               conversion.
+using Clmul128 = __m128i;
+using ClmulPoly = __m128i;
+
+static inline ClmulPoly ClmulAsPoly(Clmul128 v) { return v; }
+static inline ClmulPoly ClmulLoad64(uint64_t x) { return _mm_cvtsi64_si128(x); }
+static inline uint64_t ClmulExtract64(Clmul128 v) { return _mm_cvtsi128_si64(v); }
+// lo(a) × lo(b).
+static inline Clmul128 Clmul00(ClmulPoly a, ClmulPoly b) { return _mm_clmulepi64_si128(a, b, 0x00); }
+// hi(a) × lo(b). (imm8 bit 0 selects the high half of a; bit 4 clear selects the low half of b.)
+static inline Clmul128 Clmul01(ClmulPoly a, ClmulPoly b) { return _mm_clmulepi64_si128(a, b, 0x01); }
+static inline Clmul128 ClmulXor(Clmul128 a, Clmul128 b) { return _mm_xor_si128(a, b); }
+static inline Clmul128 ClmulOr(Clmul128 a, Clmul128 b) { return _mm_or_si128(a, b); }
+template<int N> static inline Clmul128 ClmulSrliEpi64(Clmul128 v) { return _mm_srli_epi64(v, N); }
+template<int N> static inline Clmul128 ClmulSlliEpi64(Clmul128 v) { return _mm_slli_epi64(v, N); }
+template<int N> static inline Clmul128 ClmulSrliBytes(Clmul128 v) { return _mm_srli_si128(v, N); }
+
 template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I MulWithClMulReduce(I a, I b)
 {
     static constexpr I MASK = Mask<BITS, I>();
 
-    const __m128i MOD128 = _mm_cvtsi64_si128(MOD);
-    __m128i product = _mm_clmulepi64_si128(_mm_cvtsi64_si128((uint64_t)a), _mm_cvtsi64_si128((uint64_t)b), 0x00);
+    const ClmulPoly MOD128 = ClmulLoad64(MOD);
+    Clmul128 product = Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b));
     if (BITS <= 32) {
-        __m128i high1 = _mm_srli_epi64(product, BITS);
-        __m128i red1 = _mm_clmulepi64_si128(high1, MOD128, 0x00);
-        __m128i high2 = _mm_srli_epi64(red1, BITS);
-        __m128i red2 = _mm_clmulepi64_si128(high2, MOD128, 0x00);
-        return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2)) & MASK;
+        Clmul128 high1 = ClmulSrliEpi64<BITS>(product);
+        Clmul128 red1 = Clmul00(ClmulAsPoly(high1), MOD128);
+        Clmul128 high2 = ClmulSrliEpi64<BITS>(red1);
+        Clmul128 red2 = Clmul00(ClmulAsPoly(high2), MOD128);
+        return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;
     } else if (BITS == 64) {
-        __m128i red1 = _mm_clmulepi64_si128(product, MOD128, 0x01);
-        __m128i red2 = _mm_clmulepi64_si128(red1, MOD128, 0x01);
-        return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2));
+        Clmul128 red1 = Clmul01(ClmulAsPoly(product), MOD128);
+        Clmul128 red2 = Clmul01(ClmulAsPoly(red1), MOD128);
+        return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2));
     } else if ((BITS % 8) == 0) {
-        __m128i high1 = _mm_srli_si128(product, BITS / 8);
-        __m128i red1 = _mm_clmulepi64_si128(high1, MOD128, 0x00);
-        __m128i high2 = _mm_srli_si128(red1, BITS / 8);
-        __m128i red2 = _mm_clmulepi64_si128(high2, MOD128, 0x00);
-        return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2)) & MASK;
+        Clmul128 high1 = ClmulSrliBytes<BITS / 8>(product);
+        Clmul128 red1 = Clmul00(ClmulAsPoly(high1), MOD128);
+        Clmul128 high2 = ClmulSrliBytes<BITS / 8>(red1);
+        Clmul128 red2 = Clmul00(ClmulAsPoly(high2), MOD128);
+        return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;
     } else {
-        __m128i high1 = _mm_or_si128(_mm_srli_epi64(product, BITS), _mm_srli_si128(_mm_slli_epi64(product, 64 - BITS), 8));
-        __m128i red1 = _mm_clmulepi64_si128(high1, MOD128, 0x00);
+        Clmul128 high1 = ClmulOr(ClmulSrliEpi64<BITS>(product), ClmulSrliBytes<8>(ClmulSlliEpi64<64 - BITS>(product)));
+        Clmul128 red1 = Clmul00(ClmulAsPoly(high1), MOD128);
         if ((uint64_t(MOD) >> (66 - BITS)) == 0) {
-            __m128i high2 = _mm_srli_epi64(red1, BITS);
-            __m128i red2 = _mm_clmulepi64_si128(high2, MOD128, 0x00);
-            return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2)) & MASK;
+            Clmul128 high2 = ClmulSrliEpi64<BITS>(red1);
+            Clmul128 red2 = Clmul00(ClmulAsPoly(high2), MOD128);
+            return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;
         } else {
-            __m128i high2 = _mm_or_si128(_mm_srli_epi64(red1, BITS), _mm_srli_si128(_mm_slli_epi64(red1, 64 - BITS), 8));
-            __m128i red2 = _mm_clmulepi64_si128(high2, MOD128, 0x00);
-            return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2)) & MASK;
+            Clmul128 high2 = ClmulOr(ClmulSrliEpi64<BITS>(red1), ClmulSrliBytes<8>(ClmulSlliEpi64<64 - BITS>(red1)));
+            Clmul128 red2 = Clmul00(ClmulAsPoly(high2), MOD128);
+            return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;
         }
     }
 }
@@ -69,34 +95,34 @@ template<typename I, int BITS, int POS> NO_SANITIZE_MEMORY I MulTrinomial(I a, I
 {
     static constexpr I MASK = Mask<BITS, I>();
 
-    __m128i product = _mm_clmulepi64_si128(_mm_cvtsi64_si128((uint64_t)a), _mm_cvtsi64_si128((uint64_t)b), 0x00);
+    Clmul128 product = Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b));
     if (BITS <= 32) {
-        __m128i high1 = _mm_srli_epi64(product, BITS);
-        __m128i red1 = _mm_xor_si128(high1, _mm_slli_epi64(high1, POS));
+        Clmul128 high1 = ClmulSrliEpi64<BITS>(product);
+        Clmul128 red1 = ClmulXor(high1, ClmulSlliEpi64<POS>(high1));
         if (POS == 1) {
-            return _mm_cvtsi128_si64(_mm_xor_si128(product, red1)) & MASK;
+            return ClmulExtract64(ClmulXor(product, red1)) & MASK;
         } else {
-            __m128i high2 = _mm_srli_epi64(red1, BITS);
-            __m128i red2 = _mm_xor_si128(high2, _mm_slli_epi64(high2, POS));
-            return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2)) & MASK;
+            Clmul128 high2 = ClmulSrliEpi64<BITS>(red1);
+            Clmul128 red2 = ClmulXor(high2, ClmulSlliEpi64<POS>(high2));
+            return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;
         }
     } else {
-        __m128i high1 = _mm_or_si128(_mm_srli_epi64(product, BITS), _mm_srli_si128(_mm_slli_epi64(product, 64 - BITS), 8));
+        Clmul128 high1 = ClmulOr(ClmulSrliEpi64<BITS>(product), ClmulSrliBytes<8>(ClmulSlliEpi64<64 - BITS>(product)));
         if (BITS + POS <= 66) {
-            __m128i red1 = _mm_xor_si128(high1, _mm_slli_epi64(high1, POS));
+            Clmul128 red1 = ClmulXor(high1, ClmulSlliEpi64<POS>(high1));
             if (POS == 1) {
-                return _mm_cvtsi128_si64(_mm_xor_si128(product, red1)) & MASK;
+                return ClmulExtract64(ClmulXor(product, red1)) & MASK;
             } else if (BITS + POS <= 66) {
-                __m128i high2 = _mm_srli_epi64(red1, BITS);
-                __m128i red2 = _mm_xor_si128(high2, _mm_slli_epi64(high2, POS));
-                return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2)) & MASK;
+                Clmul128 high2 = ClmulSrliEpi64<BITS>(red1);
+                Clmul128 red2 = ClmulXor(high2, ClmulSlliEpi64<POS>(high2));
+                return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;
             }
         } else {
-            const __m128i MOD128 = _mm_cvtsi64_si128(1 + (((uint64_t)1) << POS));
-            __m128i red1 = _mm_clmulepi64_si128(high1, MOD128, 0x00);
-            __m128i high2 = _mm_or_si128(_mm_srli_epi64(red1, BITS), _mm_srli_si128(_mm_slli_epi64(red1, 64 - BITS), 8));
-            __m128i red2 = _mm_xor_si128(high2, _mm_slli_epi64(high2, POS));
-            return _mm_cvtsi128_si64(_mm_xor_si128(_mm_xor_si128(product, red1), red2)) & MASK;
+            const ClmulPoly MOD128 = ClmulLoad64(1 + (((uint64_t)1) << POS));
+            Clmul128 red1 = Clmul00(ClmulAsPoly(high1), MOD128);
+            Clmul128 high2 = ClmulOr(ClmulSrliEpi64<BITS>(red1), ClmulSrliBytes<8>(ClmulSlliEpi64<64 - BITS>(red1)));
+            Clmul128 red2 = ClmulXor(high2, ClmulSlliEpi64<POS>(high2));
+            return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;
         }
     }
 }
