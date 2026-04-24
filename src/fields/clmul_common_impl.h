@@ -8,7 +8,16 @@
 #define _MINISKETCH_FIELDS_CLMUL_COMMON_IMPL_H_ 1
 
 #include <stdint.h>
-#include <immintrin.h>
+
+#if defined(__PCLMUL__)
+#  include <immintrin.h>
+#  define MINISKETCH_CLMUL_X86 1
+#elif defined(__ARM_FEATURE_CRYPTO) || defined(__ARM_FEATURE_AES)
+#  include <arm_neon.h>
+#  define MINISKETCH_CLMUL_ARM 1
+#else
+#  error "clmul_common_impl.h included without a carryless-multiply ISA enabled"
+#endif
 
 #include "../int_utils.h"
 #include "../lintrans.h"
@@ -34,10 +43,12 @@ namespace {
 //
 // Two type aliases are exposed:
 //   Clmul128  — 128-bit in-flight data (inputs to XOR, OR, and the lane shifts).
-//   ClmulPoly — the type a PMULL/PCLMULQDQ operand wants. On x86 this coincides
-//               with Clmul128; a future ARM backend would alias it to poly64x2_t
-//               so vmull_p64 reads naturally. ClmulAsPoly is the zero-cost
-//               conversion.
+//   ClmulPoly — the type a PMULL/PCLMULQDQ operand wants. On x86 the two aliases
+//               coincide; on ARM ClmulPoly is poly64x2_t so vmull_p64 reads
+//               naturally without polluting the lane-shift code with poly casts.
+//               ClmulAsPoly is the zero-cost conversion from the in-flight type
+//               to the operand type.
+#if defined(MINISKETCH_CLMUL_X86)
 using Clmul128 = __m128i;
 using ClmulPoly = __m128i;
 
@@ -53,6 +64,39 @@ static inline Clmul128 ClmulOr(Clmul128 a, Clmul128 b) { return _mm_or_si128(a, 
 template<int N> static inline Clmul128 ClmulSrliEpi64(Clmul128 v) { return _mm_srli_epi64(v, N); }
 template<int N> static inline Clmul128 ClmulSlliEpi64(Clmul128 v) { return _mm_slli_epi64(v, N); }
 template<int N> static inline Clmul128 ClmulSrliBytes(Clmul128 v) { return _mm_srli_si128(v, N); }
+#elif defined(MINISKETCH_CLMUL_ARM)
+// In-flight data is uint64x2_t — directly consumed by vshrq_n_u64, vshlq_n_u64,
+// veorq_u64, vorrq_u64. PMULL operands are poly64x2_t, the type vmull_p64's scalar
+// arguments are extracted from via vgetq_lane_p64. ClmulAsPoly is a zero-cost
+// reinterpret. With GCC 13+/Clang 19+ at -O2+, vgetq_lane_p64 + vmull_p64 fuse
+// into a direct PMULL with NEON operands — values don't spill to GPRs.
+using Clmul128 = uint64x2_t;
+using ClmulPoly = poly64x2_t;
+
+static inline ClmulPoly ClmulAsPoly(Clmul128 v) { return vreinterpretq_p64_u64(v); }
+// Load a scalar into lane 0, lane 1 zeroed — mirrors _mm_cvtsi64_si128's
+// "payload in the low 64 bits" semantics.
+static inline ClmulPoly ClmulLoad64(uint64_t x) {
+    return vsetq_lane_p64((poly64_t)x, vdupq_n_p64(0), 0);
+}
+static inline uint64_t ClmulExtract64(Clmul128 v) { return vgetq_lane_u64(v, 0); }
+// lo(a) × lo(b) via PMULL.
+static inline Clmul128 Clmul00(ClmulPoly a, ClmulPoly b) {
+    return vreinterpretq_u64_p128(vmull_p64(vgetq_lane_p64(a, 0), vgetq_lane_p64(b, 0)));
+}
+// hi(a) × lo(b) via PMULL — mirrors _mm_clmulepi64_si128(a, b, 0x01), which selects
+// the high quadword of a (imm8 bit 0 set) and the low quadword of b (imm8 bit 4 clear).
+static inline Clmul128 Clmul01(ClmulPoly a, ClmulPoly b) {
+    return vreinterpretq_u64_p128(vmull_p64(vgetq_lane_p64(a, 1), vgetq_lane_p64(b, 0)));
+}
+static inline Clmul128 ClmulXor(Clmul128 a, Clmul128 b) { return veorq_u64(a, b); }
+static inline Clmul128 ClmulOr(Clmul128 a, Clmul128 b) { return vorrq_u64(a, b); }
+template<int N> static inline Clmul128 ClmulSrliEpi64(Clmul128 v) { return vshrq_n_u64(v, N); }
+template<int N> static inline Clmul128 ClmulSlliEpi64(Clmul128 v) { return vshlq_n_u64(v, N); }
+template<int N> static inline Clmul128 ClmulSrliBytes(Clmul128 v) {
+    return vreinterpretq_u64_u8(vextq_u8(vreinterpretq_u8_u64(v), vdupq_n_u8(0), N));
+}
+#endif
 
 template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I MulWithClMulReduce(I a, I b)
 {
