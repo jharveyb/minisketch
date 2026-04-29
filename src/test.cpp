@@ -156,6 +156,17 @@ void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter) {
             elements[j] = elem;
             for (auto& sketch : sketches) sketch.Add(elem);
         }
+        // Build a parallel set of sketches via the batched AddBatch path and
+        // verify they serialize to the same bytes as the single-element path.
+        // This exercises the batch-of-4 helper plus the 0..3-element tail.
+        {
+            auto batch_sketches = CreateSketches(bits, capacity);
+            CHECK(batch_sketches.size() == sketches.size());
+            for (auto& sketch : batch_sketches) sketch.AddBatch(elements.data(), element_count);
+            for (size_t impl = 0; impl < sketches.size(); ++impl) {
+                CHECK(batch_sketches[impl].Serialize() == sketches[impl].Serialize());
+            }
+        }
         // Remove pairs of duplicates in elements, as they cancel out.
         std::sort(elements.begin(), elements.end());
         size_t real_element_count = element_count;

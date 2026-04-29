@@ -343,6 +343,37 @@ void AddToOddSyndromes(std::vector<typename F::Elem>& osyndromes, typename F::El
     }
 }
 
+// Batched variant of AddToOddSyndromes that walks the odd-syndrome vector once
+// for four elements at a time. Builds four Multipliers up front, then issues
+// four independent self-multiplications per syndrome iteration. The four mul
+// chains are independent across the four data lanes, so the CPU pipelines them;
+// the per-syndrome read+write is amortized 4x compared to four serial calls.
+template<typename F>
+void AddToOddSyndromesBatch4(std::vector<typename F::Elem>& osyndromes,
+                              typename F::Elem e0, typename F::Elem e1,
+                              typename F::Elem e2, typename F::Elem e3,
+                              const F& field) {
+    auto sqr0 = field.Sqr(e0);
+    auto sqr1 = field.Sqr(e1);
+    auto sqr2 = field.Sqr(e2);
+    auto sqr3 = field.Sqr(e3);
+    typename F::Multiplier mul0(field, sqr0);
+    typename F::Multiplier mul1(field, sqr1);
+    typename F::Multiplier mul2(field, sqr2);
+    typename F::Multiplier mul3(field, sqr3);
+    auto d0 = e0;
+    auto d1 = e1;
+    auto d2 = e2;
+    auto d3 = e3;
+    for (auto& osyndrome : osyndromes) {
+        osyndrome ^= d0 ^ d1 ^ d2 ^ d3;
+        d0 = mul0(d0);
+        d1 = mul1(d1);
+        d2 = mul2(d2);
+        d3 = mul3(d3);
+    }
+}
+
 template<typename F>
 std::vector<typename F::Elem> FullDecode(const std::vector<typename F::Elem>& osyndromes, const F& field) {
     auto asyndromes = ReconstructAllSyndromes<typename F::Elem>(osyndromes, field);
@@ -373,6 +404,23 @@ public:
     {
         auto elem = m_field.FromUint64(val);
         AddToOddSyndromes(m_syndromes, elem, m_field);
+    }
+
+    void AddBatch(const uint64_t* elements, size_t count) override
+    {
+        size_t i = 0;
+        while (i + 4 <= count) {
+            auto e0 = m_field.FromUint64(elements[i]);
+            auto e1 = m_field.FromUint64(elements[i + 1]);
+            auto e2 = m_field.FromUint64(elements[i + 2]);
+            auto e3 = m_field.FromUint64(elements[i + 3]);
+            AddToOddSyndromesBatch4(m_syndromes, e0, e1, e2, e3, m_field);
+            i += 4;
+        }
+        for (; i < count; ++i) {
+            auto elem = m_field.FromUint64(elements[i]);
+            AddToOddSyndromes(m_syndromes, elem, m_field);
+        }
     }
 
     void Serialize(unsigned char* ptr) const override
