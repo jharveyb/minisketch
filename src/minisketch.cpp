@@ -492,6 +492,12 @@ void minisketch_add_uint64(minisketch* sketch, uint64_t element) {
     s->Add(element);
 }
 
+void minisketch_add_uint64s(minisketch* sketch, const uint64_t* elements, size_t count) {
+    Sketch* s = (Sketch*)sketch;
+    s->Check();
+    s->AddBatch(elements, count);
+}
+
 size_t minisketch_merge(minisketch* sketch, const minisketch* other_sketch) {
     Sketch* s1 = (Sketch*)sketch;
     const Sketch* s2 = (const Sketch*)other_sketch;

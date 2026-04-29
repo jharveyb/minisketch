@@ -36,3 +36,5 @@ bench
 
 # CMake build directories.
 /*build*
+
+*.code-workspace

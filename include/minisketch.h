@@ -129,6 +129,18 @@ MINISKETCH_API void minisketch_deserialize(minisketch* sketch, const unsigned ch
  */
 MINISKETCH_API void minisketch_add_uint64(minisketch* sketch, uint64_t element);
 
+/** Add a batch of `count` elements to a sketch.
+ *
+ * Equivalent to calling minisketch_add_uint64() once per element in `elements`,
+ * but processes elements in groups of four with internally-amortized state to
+ * reduce memory traffic and let the CPU pipeline four independent inner-loop
+ * multiplications. Trailing elements (count not a multiple of 4) are added
+ * one-by-one via the same code path as minisketch_add_uint64().
+ *
+ * Each element is interpreted exactly as in minisketch_add_uint64().
+ */
+MINISKETCH_API void minisketch_add_uint64s(minisketch* sketch, const uint64_t* elements, size_t count);
+
 /** Merge the elements of another sketch into this sketch.
  *
  * After merging, `sketch` will contain every element that existed in one but not
@@ -296,6 +308,14 @@ public:
     Minisketch& Add(uint64_t element) noexcept
     {
         minisketch_add_uint64(m_minisketch.get(), element);
+        return *this;
+    }
+
+    /** Add a batch of elements to a (valid) Minisketch object via the
+     *  internally-batched code path. See minisketch_add_uint64s(). */
+    Minisketch& AddBatch(const uint64_t* elements, size_t count) noexcept
+    {
+        minisketch_add_uint64s(m_minisketch.get(), elements, count);
         return *this;
     }
 
