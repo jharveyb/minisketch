@@ -26,7 +26,7 @@ static const char* ImplName(uint32_t impl) {
 
 // Print CLI usage; invoked on --help/-h or on any argument error.
 static void PrintUsage(const char* prog) {
-    printf("Usage: %s [--sweep] [--sweep-errors] [--create-only] [--data-sweep] [--add-batch] [--impl N] [--data N] [--syndromes N] [--errors N] [--iters N]\n", prog);
+    printf("Usage: %s [--sweep] [--sweep-errors] [--create-only] [--data-sweep] [--add-batch] [--batch-size-sweep] [--impl N] [--data N] [--syndromes N] [--errors N] [--iters N]\n", prog);
     printf("  --sweep          run fixed matrix: bits in {64}, capacity in {1024,2048,...,8192}\n");
     printf("                   (in sweep mode --syndromes is ignored)\n");
     printf("  --sweep-errors   for each swept capacity, test errors at 10%%, 25%%, 50%%, 75%%, 100%% of capacity\n");
@@ -40,6 +40,10 @@ static void PrintUsage(const char* prog) {
     printf("  --batch-size N   batch size used by --add-batch (1, 2, 4, or 8). Default 4. The metric\n");
     printf("                   labels gain a -K suffix (e.g. create-batch-K8[ns]) so a single run\n");
     printf("                   sweeping batch sizes produces clearly distinguishable rows.\n");
+    printf("  --batch-size-sweep\n");
+    printf("                   for each (bits, capacity, errors, data_len) point, run the create\n");
+    printf("                   benchmark at every batch size in {1, 2, 4, 8}. Implies --add-batch\n");
+    printf("                   and --create-only; conflicts with --batch-size.\n");
     printf("  --impl N         restrict to implementation N (0..minisketch_implementation_max())\n");
     printf("                   default: iterate all implementations\n");
     printf("  --data N         elements added per sketch in the 'create' phase (default: errors*10)\n");
@@ -167,6 +171,26 @@ static void RunCreateBench(int bits, int syndromes, int errors, int iters,
     }
 }
 
+// Wrapper around RunCreateBench that, when batch_size_sweep is true, runs the
+// create benchmark once per batch size in {1, 2, 4, 8} for the given (bits,
+// syndromes, errors, data_len) point. Each batch size emits a distinct
+// "create-batch-K<N>[ns]" row, so a single run produces a complete sweep
+// table without external orchestration.
+static void DispatchCreateBench(int bits, int syndromes, int errors, int iters,
+                                  long data_len, uint32_t impl_lo, uint32_t impl_hi,
+                                  bool add_batch, uint32_t batch_size,
+                                  bool batch_size_sweep) {
+    if (batch_size_sweep) {
+        for (uint32_t bs : {1u, 2u, 4u, 8u}) {
+            RunCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi,
+                           /*add_batch=*/true, bs);
+        }
+    } else {
+        RunCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi,
+                       add_batch, batch_size);
+    }
+}
+
 // Accept either "--flag value" (consuming argv[++i]) or "--flag=value".
 // Returns true and sets out_val on match.
 static bool ParseFlagValue(const char* arg, const char* prefix, size_t prefix_len,
@@ -192,6 +216,8 @@ int main(int argc, char** argv) {
     bool data_sweep = false;
     bool add_batch = false;
     uint32_t batch_size = 4;
+    bool batch_size_given = false;
+    bool batch_size_sweep = false;
     bool explicit_bits = false;
     int impl_pin = -1;
     long data_override = -1;
@@ -218,6 +244,10 @@ int main(int argc, char** argv) {
             create_only = true;
         } else if (strcmp(a, "--add-batch") == 0) {
             add_batch = true;
+        } else if (strcmp(a, "--batch-size-sweep") == 0) {
+            batch_size_sweep = true;
+            add_batch = true;
+            create_only = true;
         } else if (ParseFlagValue(a, "--batch-size", 12, argc, argv, i, v)) {
             long bs = strtol(v, NULL, 10);
             if (bs != 1 && bs != 2 && bs != 4 && bs != 8) {
@@ -225,6 +255,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
             batch_size = (uint32_t)bs;
+            batch_size_given = true;
         } else if (ParseFlagValue(a, "--impl", 6, argc, argv, i, v)) {
             impl_pin = strtol(v, NULL, 10);
         } else if (ParseFlagValue(a, "--data", 6, argc, argv, i, v)) {
@@ -272,6 +303,10 @@ int main(int argc, char** argv) {
         printf("--data-sweep conflicts with --sweep-errors\n");
         return 1;
     }
+    if (batch_size_sweep && batch_size_given) {
+        printf("--batch-size-sweep conflicts with --batch-size\n");
+        return 1;
+    }
 
     uint32_t max_impl = minisketch_implementation_max();
     if (impl_pin != -1) {
@@ -310,8 +345,8 @@ int main(int argc, char** argv) {
             for (int cap : caps) {
                 if (data_sweep) {
                     for (long data_len : data_lens_sweep) {
-                        RunCreateBench(bits, cap, /*errors=*/0, iters, data_len,
-                                       impl_lo, impl_hi, add_batch, batch_size);
+                        DispatchCreateBench(bits, cap, /*errors=*/0, iters, data_len,
+                                            impl_lo, impl_hi, add_batch, batch_size, batch_size_sweep);
                     }
                     continue;
                 }
@@ -332,7 +367,7 @@ int main(int argc, char** argv) {
                     if (!create_only) {
                         RunDecodeBench(bits, cap, eff_errors, iters, impl_lo, impl_hi);
                     }
-                    RunCreateBench(bits, cap, eff_errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
+                    DispatchCreateBench(bits, cap, eff_errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size, batch_size_sweep);
                 }
             }
         }
@@ -341,8 +376,8 @@ int main(int argc, char** argv) {
             if (!minisketch_bits_supported(bits)) continue;
             if (data_sweep) {
                 for (long data_len : data_lens_sweep) {
-                    RunCreateBench(bits, syndromes, /*errors=*/0, iters, data_len,
-                                   impl_lo, impl_hi, add_batch, batch_size);
+                    DispatchCreateBench(bits, syndromes, /*errors=*/0, iters, data_len,
+                                        impl_lo, impl_hi, add_batch, batch_size, batch_size_sweep);
                 }
                 continue;
             }
@@ -351,7 +386,7 @@ int main(int argc, char** argv) {
             if (!create_only) {
                 RunDecodeBench(bits, syndromes, errors, iters, impl_lo, impl_hi);
             }
-            RunCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
+            DispatchCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size, batch_size_sweep);
         }
     }
     return 0;
