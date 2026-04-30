@@ -47,6 +47,23 @@ IMPL_MARKERS = {
 
 NUMERIC_COLS = ["bits", "capacity", "errors", "data_len", "value"]
 
+# Batch sizes accepted by `bench --batch-size` and emitted under the
+# create-batch-K{N}[ns] / create-batch-K{N}-total[ms] metric labels.
+BATCH_SIZES = (1, 2, 4, 8)
+
+
+def _create_metric(base: str, batch_size: int | None) -> str:
+    """Resolve a base ('create' or 'create-total') to its TSV column name.
+    With batch_size=None we use the legacy single-element labels emitted by
+    `bench` without --add-batch; with a value in {1, 2, 4, 8} we look up the
+    per-K row emitted by `bench --add-batch --batch-size K`."""
+    unit = "[ms]" if base == "create-total" else "[ns]"
+    if batch_size is None:
+        return f"{base}{unit}"
+    if base == "create-total":
+        return f"create-batch-K{batch_size}-total{unit}"
+    return f"create-batch-K{batch_size}{unit}"
+
 
 def load_tsv(paths: list[Path]) -> pd.DataFrame:
     """Load and concatenate one or more bench TSVs, stripping repeated headers."""
@@ -225,27 +242,36 @@ def plot_capacity_vs_decode_50pct(df: pd.DataFrame, *, bits: int,
 
 
 def plot_capacity_vs_create(df: pd.DataFrame, *, bits: int,
-                            errors: list[int] | None, out: Path,
+                            errors: list[int] | None,
+                            batch_size: int | None, out: Path,
                             title_suffix: str = "") -> None:
     """Plot #3: total creation time vs capacity, at one or more fixed errors values.
 
-    One line per (errors, implementation): color = errors, marker = impl."""
-    sub = df[(df["metric"] == "create-total[ms]") & (df["bits"] == bits)]
+    One line per (errors, implementation): color = errors, marker = impl.
+    With batch_size in {1, 2, 4, 8} the plot reads the create-batch-K{N}-total[ms]
+    rows produced by `bench --add-batch --batch-size N`; without it, the legacy
+    create-total[ms] rows."""
+    metric = _create_metric("create-total", batch_size)
+    sub = df[(df["metric"] == metric) & (df["bits"] == bits)]
     errors = _resolve_list(errors, sub, "errors")
     if errors is None:
         _skip(out.name,
-              f"no create-total[ms] rows at bits={bits} with multiple capacities per errors")
+              f"no {metric} rows at bits={bits} with multiple capacities per errors")
         return
     sub = sub[sub["errors"].isin(errors)]
     if sub.empty: # or sub["capacity"].nunique() < 2:
+        bench_hint = (f"./bench --sweep --errors $e --add-batch --batch-size {batch_size}"
+                      if batch_size is not None
+                      else "./bench --sweep --errors $e")
         _skip(out.name,
-              f"need create-total[ms] at bits={bits}, errors in {errors} across capacities "
-              f"(try: for e in {' '.join(map(str, errors))}; do ./bench --sweep --errors $e; done)")
+              f"need {metric} at bits={bits}, errors in {errors} across capacities "
+              f"(try: for e in {' '.join(map(str, errors))}; do {bench_hint}; done)")
         return
+    title_extra = f", K={batch_size}" if batch_size is not None else ""
     _plot_grouped(sub, x_col="capacity",
                   color_col="errors", color_label="errors",
                   xlabel="Capacity", ylabel="Creation time",
-                  title=f"Creation time vs capacity (bits={bits}){title_suffix}",
+                  title=f"Creation time vs capacity (bits={bits}{title_extra}){title_suffix}",
                   out=out)
 
 
@@ -274,20 +300,69 @@ def plot_capacity_vs_decode_fixed(df: pd.DataFrame, *, bits: int,
                   out=out)
 
 
-# Load the benchmark output and compute various metrics, without plotting.
-def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
-    generic_times = df[(df["metric"] == "recover[ms]") & (df["implementation"] == "GENERIC")]["value"]
-    generic_times.index += 1
-    clmul_times = df[(df["metric"] == "recover[ms]") & (df["implementation"] == "CLMUL")]["value"]
-    clmul_speedup = generic_times.div(clmul_times)
-    print(f"Average speedup from CLMUL: {clmul_speedup.mean():.3f}x")
+# Inner-join two DataFrame slices on the (bits, capacity, errors, data_len)
+# point so the row-wise ratio stays apples-to-apples. The previous version of
+# this script aligned by `.index += K` arithmetic, which silently mis-paired
+# rows whenever the two slices had different lengths or row counts per impl.
+def _row_aligned_ratio(num: pd.DataFrame, den: pd.DataFrame) -> pd.Series:
+    keys = ["bits", "capacity", "errors", "data_len"]
+    if num.empty or den.empty:
+        return pd.Series(dtype=float)
+    joined = num.merge(den, on=keys, suffixes=("_num", "_den"))
+    if joined.empty:
+        return pd.Series(dtype=float)
+    return joined["value_num"] / joined["value_den"]
 
-    generic_create_op_time = df[(df["metric"] == "create[ns]") & (df["implementation"] == "GENERIC")]["value"]
-    generic_create_op_time.index += 2
-    clmul_create_op_time = df[(df["metric"] == "create[ns]") & (df["implementation"] == "CLMUL")]["value"]
-    clmul_difference = generic_create_op_time.div(clmul_create_op_time)
-    print(f"Average timing change from CLMUL for create[ns] (adding one element to sketch): {clmul_difference.mean():.3f}x")
-    return clmul_speedup
+
+def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
+    impls = ["GENERIC", "CLMUL", "CLMUL_TRI"]
+
+    # 1) Cross-impl decode speedup (recover[ms]): how much faster than GENERIC.
+    recover = df[df["metric"] == "recover[ms]"]
+    g_recover = recover[recover["implementation"] == "GENERIC"]
+    for impl in ("CLMUL", "CLMUL_TRI"):
+        ratio = _row_aligned_ratio(g_recover, recover[recover["implementation"] == impl])
+        if not ratio.empty:
+            print(f"Average recover speedup {impl}/GENERIC: {ratio.mean():.3f}x")
+
+    # 2) Per-impl batch-size speedup on create[ns]: K={2, 4, 8} vs K=1.
+    print("\nPer-impl create[ns] speedup vs K=1 (higher = batch helped):")
+    for impl in impls:
+        baseline = df[(df["metric"] == _create_metric("create", 1))
+                      & (df["implementation"] == impl)]
+        if baseline.empty:
+            continue
+        cells = []
+        for k in (2, 4, 8):
+            kth = df[(df["metric"] == _create_metric("create", k))
+                     & (df["implementation"] == impl)]
+            ratio = _row_aligned_ratio(baseline, kth)
+            if not ratio.empty:
+                cells.append(f"K={k}: {ratio.mean():.3f}x")
+        if cells:
+            print(f"  {impl:9s}  {' | '.join(cells)}")
+
+    # 3) Cross-impl ratio at equal K on create[ns]: how much faster {CLMUL,
+    # CLMUL_TRI} are than GENERIC at the same batch size. >1 means the
+    # accelerated impl wins; <1 means it loses (likely table-build overhead
+    # outweighing the inner-loop gain at small capacity).
+    print("\nCross-impl create[ns] ratio at equal K (>1 means accelerated impl is faster):")
+    for impl in ("CLMUL", "CLMUL_TRI"):
+        cells = []
+        for k in BATCH_SIZES:
+            metric = _create_metric("create", k)
+            ratio = _row_aligned_ratio(
+                df[(df["metric"] == metric) & (df["implementation"] == "GENERIC")],
+                df[(df["metric"] == metric) & (df["implementation"] == impl)],
+            )
+            if not ratio.empty:
+                cells.append(f"K={k}: {ratio.mean():.3f}x")
+        if cells:
+            print(f"  GENERIC/{impl:9s} {' | '.join(cells)}")
+
+    # Return the recover ratio (CLMUL/GENERIC) for backwards compat with the
+    # `--plots stats` caller which prints whatever comes back.
+    return _row_aligned_ratio(g_recover, recover[recover["implementation"] == "CLMUL"])
 
 
 PLOT_REGISTRY = {
@@ -301,7 +376,10 @@ PLOT_REGISTRY = {
                   title_suffix=args.title_suffix)),
     "create": ("create.png",
                lambda df, args, out: plot_capacity_vs_create(
-                   df, bits=args.bits, errors=args.fixed_errors, out=out,
+                   df, bits=args.bits, errors=args.fixed_errors,
+                   batch_size=args.batch_size,
+                   out=(out.with_stem(f"{out.stem}_K{args.batch_size}")
+                        if args.batch_size is not None else out),
                    title_suffix=args.title_suffix)),
     "cap-fixed": ("cap_fixed.png",
                   lambda df, args, out: plot_capacity_vs_decode_fixed(
@@ -335,6 +413,13 @@ def main() -> None:
                         metavar="E1,E2,...",
                         help="comma-separated errors values for plots #3 and #4 "
                              "(default: auto-pick the largest one available)")
+    parser.add_argument("--batch-size", type=int, default=None,
+                        choices=list(BATCH_SIZES),
+                        help="batch size for plots that read create / "
+                             "create-total: read create-batch-K{N}[ns] and "
+                             "create-batch-K{N}-total[ms] rows instead, and "
+                             "suffix the output filename with _K{N}. "
+                             "Omit to use the legacy single-element labels.")
     parser.add_argument("--plots", nargs="+",
                         choices=list(PLOT_REGISTRY.keys()) + ["all","stats"],
                         default=["all"],
