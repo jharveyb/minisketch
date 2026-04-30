@@ -156,13 +156,17 @@ void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter) {
             elements[j] = elem;
             for (auto& sketch : sketches) sketch.Add(elem);
         }
-        // Build a parallel set of sketches via the batched AddBatch path and
-        // verify they serialize to the same bytes as the single-element path.
-        // This exercises the batch-of-4 helper plus the 0..3-element tail.
-        {
+        // Build parallel sets of sketches via the batched AddBatch path with
+        // each accepted batch size, and verify they serialize to the same
+        // bytes as the single-element path. Exercises every dispatch arm
+        // (K=1/2/4/8) and the 0..K-1 element tail.
+        for (uint32_t batch_size : {1u, 2u, 4u, 8u}) {
             auto batch_sketches = CreateSketches(bits, capacity);
             CHECK(batch_sketches.size() == sketches.size());
-            for (auto& sketch : batch_sketches) sketch.AddBatch(elements.data(), element_count);
+            for (auto& sketch : batch_sketches) {
+                CHECK(sketch.SetBatchSize(batch_size));
+                sketch.AddBatch(elements.data(), element_count);
+            }
             for (size_t impl = 0; impl < sketches.size(); ++impl) {
                 CHECK(batch_sketches[impl].Serialize() == sketches[impl].Serialize());
             }

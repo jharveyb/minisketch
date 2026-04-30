@@ -34,6 +34,9 @@ public:
     /** Add `count` elements at once. Default implementation simply calls Add() per element;
      *  field-specific overrides can batch the inner work. */
     virtual void AddBatch(const uint64_t* elements, size_t count) = 0;
+    /** Choose how many elements AddBatch() processes per inner-loop pass over the syndrome
+     *  vector. Accepted values: 1, 2, 4, 8. Returns 1 if the value was accepted, 0 otherwise. */
+    virtual int SetBatchSize(uint32_t batch_size) = 0;
     virtual void Serialize(unsigned char*) const = 0;
     virtual void Deserialize(const unsigned char*) = 0;
     virtual size_t Merge(const Sketch* other_sketch) = 0;

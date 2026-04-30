@@ -141,6 +141,19 @@ MINISKETCH_API void minisketch_add_uint64(minisketch* sketch, uint64_t element);
  */
 MINISKETCH_API void minisketch_add_uint64s(minisketch* sketch, const uint64_t* elements, size_t count);
 
+/** Set the batch size used by minisketch_add_uint64s().
+ *
+ * minisketch_add_uint64s() processes elements in chunks. Larger chunks reduce
+ * per-syndrome memory traffic and allow the CPU to pipeline more independent
+ * inner-loop multiplications, but cost more upfront when building per-element
+ * Multiplier state.
+ *
+ * Accepted values: 1 (no batching, equivalent to looping single-element add),
+ * 2, 4 (default), or 8. Returns 1 if the value was accepted; 0 otherwise.
+ * Calling minisketch_add_uint64s() before this function uses the default of 4.
+ */
+MINISKETCH_API int minisketch_set_batch_size(minisketch* sketch, uint32_t batch_size);
+
 /** Merge the elements of another sketch into this sketch.
  *
  * After merging, `sketch` will contain every element that existed in one but not
@@ -317,6 +330,13 @@ public:
     {
         minisketch_add_uint64s(m_minisketch.get(), elements, count);
         return *this;
+    }
+
+    /** Set the batch size used by AddBatch on a (valid) Minisketch object.
+     *  See minisketch_set_batch_size(). Returns true if the size was accepted. */
+    bool SetBatchSize(uint32_t batch_size) noexcept
+    {
+        return minisketch_set_batch_size(m_minisketch.get(), batch_size) != 0;
     }
 
     /** Merge sketch into *this; both have to be valid Minisketch objects.

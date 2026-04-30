@@ -343,24 +343,40 @@ void AddToOddSyndromes(std::vector<typename F::Elem>& osyndromes, typename F::El
     }
 }
 
-// Batched variant of AddToOddSyndromes that walks the odd-syndrome vector once
-// for four elements at a time. Builds four Multipliers up front, then issues
-// four independent self-multiplications per syndrome iteration. The four mul
-// chains are independent across the four data lanes, so the CPU pipelines them;
-// the per-syndrome read+write is amortized 4x compared to four serial calls.
+// Batched variants of AddToOddSyndromes that walk the odd-syndrome vector once
+// for K elements at a time (K in {2, 4, 8}). Each builds K Multipliers up front
+// and then issues K independent self-multiplications per syndrome iteration.
+// The K mul chains are independent across the K lanes, so the CPU pipelines
+// them; the per-syndrome read+write is amortized Kx compared to K serial calls.
+//
+// We keep three explicit K-instantiations rather than a single C++11 template
+// over K because Multiplier has no default constructor — a generic version
+// requires placement-new on aligned_storage, which adds boilerplate without
+// adding flexibility (only K = 1, 2, 4, 8 are wired into the dispatch).
+template<typename F>
+void AddToOddSyndromesBatch2(std::vector<typename F::Elem>& osyndromes,
+                              typename F::Elem e0, typename F::Elem e1,
+                              const F& field) {
+    typename F::Multiplier mul0(field, field.Sqr(e0));
+    typename F::Multiplier mul1(field, field.Sqr(e1));
+    auto d0 = e0;
+    auto d1 = e1;
+    for (auto& osyndrome : osyndromes) {
+        osyndrome ^= d0 ^ d1;
+        d0 = mul0(d0);
+        d1 = mul1(d1);
+    }
+}
+
 template<typename F>
 void AddToOddSyndromesBatch4(std::vector<typename F::Elem>& osyndromes,
                               typename F::Elem e0, typename F::Elem e1,
                               typename F::Elem e2, typename F::Elem e3,
                               const F& field) {
-    auto sqr0 = field.Sqr(e0);
-    auto sqr1 = field.Sqr(e1);
-    auto sqr2 = field.Sqr(e2);
-    auto sqr3 = field.Sqr(e3);
-    typename F::Multiplier mul0(field, sqr0);
-    typename F::Multiplier mul1(field, sqr1);
-    typename F::Multiplier mul2(field, sqr2);
-    typename F::Multiplier mul3(field, sqr3);
+    typename F::Multiplier mul0(field, field.Sqr(e0));
+    typename F::Multiplier mul1(field, field.Sqr(e1));
+    typename F::Multiplier mul2(field, field.Sqr(e2));
+    typename F::Multiplier mul3(field, field.Sqr(e3));
     auto d0 = e0;
     auto d1 = e1;
     auto d2 = e2;
@@ -371,6 +387,48 @@ void AddToOddSyndromesBatch4(std::vector<typename F::Elem>& osyndromes,
         d1 = mul1(d1);
         d2 = mul2(d2);
         d3 = mul3(d3);
+    }
+}
+
+template<typename F>
+void AddToOddSyndromesBatch8(std::vector<typename F::Elem>& osyndromes,
+                              typename F::Elem e0, typename F::Elem e1,
+                              typename F::Elem e2, typename F::Elem e3,
+                              typename F::Elem e4, typename F::Elem e5,
+                              typename F::Elem e6, typename F::Elem e7,
+                              const F& field) {
+    typename F::Multiplier mul0(field, field.Sqr(e0));
+    typename F::Multiplier mul1(field, field.Sqr(e1));
+    typename F::Multiplier mul2(field, field.Sqr(e2));
+    typename F::Multiplier mul3(field, field.Sqr(e3));
+    typename F::Multiplier mul4(field, field.Sqr(e4));
+    typename F::Multiplier mul5(field, field.Sqr(e5));
+    typename F::Multiplier mul6(field, field.Sqr(e6));
+    typename F::Multiplier mul7(field, field.Sqr(e7));
+    auto d0 = e0;
+    auto d1 = e1;
+    auto d2 = e2;
+    auto d3 = e3;
+    auto d4 = e4;
+    auto d5 = e5;
+    auto d6 = e6;
+    auto d7 = e7;
+    for (auto& osyndrome : osyndromes) {
+        // Tree-reduce the eight XORs so the reduction takes 3 dependent
+        // cycles instead of 7, leaving more room for the 8 muls to retire.
+        auto x01 = d0 ^ d1;
+        auto x23 = d2 ^ d3;
+        auto x45 = d4 ^ d5;
+        auto x67 = d6 ^ d7;
+        osyndrome ^= (x01 ^ x23) ^ (x45 ^ x67);
+        d0 = mul0(d0);
+        d1 = mul1(d1);
+        d2 = mul2(d2);
+        d3 = mul3(d3);
+        d4 = mul4(d4);
+        d5 = mul5(d5);
+        d6 = mul6(d6);
+        d7 = mul7(d7);
     }
 }
 
@@ -388,6 +446,10 @@ class SketchImpl final : public Sketch
     const F m_field;
     std::vector<typename F::Elem> m_syndromes;
     typename F::Elem m_basis;
+    // Batch size used by AddBatch(). One of {1, 2, 4, 8}; default 4 matches
+    // the original single-helper implementation. Settable at runtime via
+    // minisketch_set_batch_size() so callers (and the bench tool) can sweep.
+    uint32_t m_batch_size = 4;
 
 public:
     template<typename... Args>
@@ -406,16 +468,45 @@ public:
         AddToOddSyndromes(m_syndromes, elem, m_field);
     }
 
+    int SetBatchSize(uint32_t batch_size) override
+    {
+        if (batch_size != 1 && batch_size != 2 && batch_size != 4 && batch_size != 8) return 0;
+        m_batch_size = batch_size;
+        return 1;
+    }
+
     void AddBatch(const uint64_t* elements, size_t count) override
     {
         size_t i = 0;
-        while (i + 4 <= count) {
-            auto e0 = m_field.FromUint64(elements[i]);
-            auto e1 = m_field.FromUint64(elements[i + 1]);
-            auto e2 = m_field.FromUint64(elements[i + 2]);
-            auto e3 = m_field.FromUint64(elements[i + 3]);
-            AddToOddSyndromesBatch4(m_syndromes, e0, e1, e2, e3, m_field);
-            i += 4;
+        if (m_batch_size == 8) {
+            while (i + 8 <= count) {
+                auto e0 = m_field.FromUint64(elements[i]);
+                auto e1 = m_field.FromUint64(elements[i + 1]);
+                auto e2 = m_field.FromUint64(elements[i + 2]);
+                auto e3 = m_field.FromUint64(elements[i + 3]);
+                auto e4 = m_field.FromUint64(elements[i + 4]);
+                auto e5 = m_field.FromUint64(elements[i + 5]);
+                auto e6 = m_field.FromUint64(elements[i + 6]);
+                auto e7 = m_field.FromUint64(elements[i + 7]);
+                AddToOddSyndromesBatch8(m_syndromes, e0, e1, e2, e3, e4, e5, e6, e7, m_field);
+                i += 8;
+            }
+        } else if (m_batch_size == 4) {
+            while (i + 4 <= count) {
+                auto e0 = m_field.FromUint64(elements[i]);
+                auto e1 = m_field.FromUint64(elements[i + 1]);
+                auto e2 = m_field.FromUint64(elements[i + 2]);
+                auto e3 = m_field.FromUint64(elements[i + 3]);
+                AddToOddSyndromesBatch4(m_syndromes, e0, e1, e2, e3, m_field);
+                i += 4;
+            }
+        } else if (m_batch_size == 2) {
+            while (i + 2 <= count) {
+                auto e0 = m_field.FromUint64(elements[i]);
+                auto e1 = m_field.FromUint64(elements[i + 1]);
+                AddToOddSyndromesBatch2(m_syndromes, e0, e1, m_field);
+                i += 2;
+            }
         }
         for (; i < count; ++i) {
             auto elem = m_field.FromUint64(elements[i]);
