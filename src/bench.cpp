@@ -37,6 +37,9 @@ static void PrintUsage(const char* prog) {
     printf("  --add-batch      use minisketch_add_uint64s in the 'create' benchmark instead of\n");
     printf("                   looping minisketch_add_uint64; metric labels become create-batch[ns]\n");
     printf("                   and create-batch-total[ms] so output diffs cleanly against the default.\n");
+    printf("  --batch-size N   batch size used by --add-batch (1, 2, 4, or 8). Default 4. The metric\n");
+    printf("                   labels gain a -K suffix (e.g. create-batch-K8[ns]) so a single run\n");
+    printf("                   sweeping batch sizes produces clearly distinguishable rows.\n");
     printf("  --impl N         restrict to implementation N (0..minisketch_implementation_max())\n");
     printf("                   default: iterate all implementations\n");
     printf("  --data N         elements added per sketch in the 'create' phase (default: errors*10)\n");
@@ -101,12 +104,20 @@ static void RunDecodeBench(int bits, int syndromes, int errors, int iters,
 //
 // When add_batch is true, the loop uses minisketch_add_uint64s (the batched
 // public API) instead of looping minisketch_add_uint64; the metric labels are
-// suffixed with "-batch" so single-element and batch runs are easy to diff.
+// suffixed with "-batch-K<batch_size>" so single-element runs and batch runs
+// at different K values produce visually distinct rows.
 static void RunCreateBench(int bits, int syndromes, int errors, int iters,
                            long data_len, uint32_t impl_lo, uint32_t impl_hi,
-                           bool add_batch) {
-    const char* per_label = add_batch ? "create-batch[ns]" : "create[ns]";
-    const char* total_label = add_batch ? "create-batch-total[ms]" : "create-total[ms]";
+                           bool add_batch, uint32_t batch_size) {
+    char per_label[64];
+    char total_label[64];
+    if (add_batch) {
+        snprintf(per_label, sizeof(per_label), "create-batch-K%u[ns]", batch_size);
+        snprintf(total_label, sizeof(total_label), "create-batch-K%u-total[ms]", batch_size);
+    } else {
+        snprintf(per_label, sizeof(per_label), "create[ns]");
+        snprintf(total_label, sizeof(total_label), "create-total[ms]");
+    }
     for (uint32_t impl = impl_lo; impl <= impl_hi; ++impl) {
         std::vector<minisketch*> states;
         std::random_device rng;
@@ -118,6 +129,12 @@ static void RunCreateBench(int bits, int syndromes, int errors, int iters,
         benches.reserve(iters);
         for (int i = 0; i < iters; ++i) {
             states[i] = minisketch_create(bits, impl, syndromes);
+            if (add_batch && states[i]) {
+                if (!minisketch_set_batch_size(states[i], batch_size)) {
+                    fprintf(stderr, "Invalid --batch-size %u\n", batch_size);
+                    exit(1);
+                }
+            }
         }
         for (size_t i = 0; i < data.size(); ++i) {
             data[i] = dist(rng);
@@ -174,6 +191,7 @@ int main(int argc, char** argv) {
     bool create_only = false;
     bool data_sweep = false;
     bool add_batch = false;
+    uint32_t batch_size = 4;
     bool explicit_bits = false;
     int impl_pin = -1;
     long data_override = -1;
@@ -200,6 +218,13 @@ int main(int argc, char** argv) {
             create_only = true;
         } else if (strcmp(a, "--add-batch") == 0) {
             add_batch = true;
+        } else if (ParseFlagValue(a, "--batch-size", 12, argc, argv, i, v)) {
+            long bs = strtol(v, NULL, 10);
+            if (bs != 1 && bs != 2 && bs != 4 && bs != 8) {
+                printf("--batch-size value (%ld) must be one of 1, 2, 4, or 8\n", bs);
+                return 1;
+            }
+            batch_size = (uint32_t)bs;
         } else if (ParseFlagValue(a, "--impl", 6, argc, argv, i, v)) {
             impl_pin = strtol(v, NULL, 10);
         } else if (ParseFlagValue(a, "--data", 6, argc, argv, i, v)) {
@@ -259,7 +284,7 @@ int main(int argc, char** argv) {
     uint32_t impl_lo = (impl_pin >= 0) ? (uint32_t)impl_pin : 0u;
     uint32_t impl_hi = (impl_pin >= 0) ? (uint32_t)impl_pin : max_impl;
 
-    const long data_lens_sweep[] = {16, 64, 128, 512, 1024, 2048, 4096, 8192, 16384, 51200, 102400};
+    const long data_lens_sweep[] = {16, 64, 128, 512, 1024, 2048, 4096, 8192};
 
     if (sweep_errors && errors_given) {
         fprintf(stderr, "Note: in --sweep-errors mode, --errors is ignored\n");
@@ -286,7 +311,7 @@ int main(int argc, char** argv) {
                 if (data_sweep) {
                     for (long data_len : data_lens_sweep) {
                         RunCreateBench(bits, cap, /*errors=*/0, iters, data_len,
-                                       impl_lo, impl_hi, add_batch);
+                                       impl_lo, impl_hi, add_batch, batch_size);
                     }
                     continue;
                 }
@@ -307,7 +332,7 @@ int main(int argc, char** argv) {
                     if (!create_only) {
                         RunDecodeBench(bits, cap, eff_errors, iters, impl_lo, impl_hi);
                     }
-                    RunCreateBench(bits, cap, eff_errors, iters, data_len, impl_lo, impl_hi, add_batch);
+                    RunCreateBench(bits, cap, eff_errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
                 }
             }
         }
@@ -317,7 +342,7 @@ int main(int argc, char** argv) {
             if (data_sweep) {
                 for (long data_len : data_lens_sweep) {
                     RunCreateBench(bits, syndromes, /*errors=*/0, iters, data_len,
-                                   impl_lo, impl_hi, add_batch);
+                                   impl_lo, impl_hi, add_batch, batch_size);
                 }
                 continue;
             }
@@ -326,7 +351,7 @@ int main(int argc, char** argv) {
             if (!create_only) {
                 RunDecodeBench(bits, syndromes, errors, iters, impl_lo, impl_hi);
             }
-            RunCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi, add_batch);
+            RunCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
         }
     }
     return 0;
