@@ -314,7 +314,18 @@ def _row_aligned_ratio(num: pd.DataFrame, den: pd.DataFrame) -> pd.Series:
     return joined["value_num"] / joined["value_den"]
 
 
-def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
+def compute_stats(df: pd.DataFrame, *, bits: int) -> pd.DataFrame:
+    """Compute speedups within and across implementations at the requested
+    field size. Mean ratios across heterogeneous (bits, capacity, errors,
+    data_len) configurations are noisy — fixing a single field size makes
+    each section interpretable. The user can re-run with different --bits
+    values to compare wide-field vs narrow-field behavior."""
+    df = df[df["bits"] == bits]
+    if df.empty:
+        print(f"compute_stats: no rows at bits={bits}")
+        return pd.Series(dtype=float)
+    print(f"\nStats at bits={bits}:")
+
     impls = ["GENERIC", "CLMUL", "CLMUL_TRI"]
 
     # 1) Cross-impl decode speedup (recover[ms]): how much faster than GENERIC.
@@ -434,7 +445,7 @@ def main() -> None:
     print(f"loaded {len(df)} rows from {len(args.inputs)} file(s)")
 
     if "stats" in args.plots:
-        df = compute_stats(df)
+        df = compute_stats(df, bits=args.bits)
         print("computed stats")
         print(df)
         return
