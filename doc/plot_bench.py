@@ -378,25 +378,38 @@ def compute_stats(df: pd.DataFrame, *, bits: int) -> pd.DataFrame:
 
 PLOT_REGISTRY = {
     "diff": ("diff.png",
-             lambda df, args, out: plot_diff_vs_decode(
-                 df, capacities=args.fixed_capacity, bits=args.bits, out=out,
+             lambda df, args, bits, out: plot_diff_vs_decode(
+                 df, capacities=args.fixed_capacity, bits=bits, out=out,
                  title_suffix=args.title_suffix)),
     "cap50": ("cap50.png",
-              lambda df, args, out: plot_capacity_vs_decode_50pct(
-                  df, bits=args.bits, out=out,
+              lambda df, args, bits, out: plot_capacity_vs_decode_50pct(
+                  df, bits=bits, out=out,
                   title_suffix=args.title_suffix)),
     "create": ("create.png",
-               lambda df, args, out: plot_capacity_vs_create(
-                   df, bits=args.bits, errors=args.fixed_errors,
-                   batch_size=args.batch_size,
-                   out=(out.with_stem(f"{out.stem}_K{args.batch_size}")
-                        if args.batch_size is not None else out),
+               lambda df, args, bits, out: plot_capacity_vs_create(
+                   df, bits=bits, errors=args.fixed_errors,
+                   batch_size=args.batch_size, out=out,
                    title_suffix=args.title_suffix)),
     "cap-fixed": ("cap_fixed.png",
-                  lambda df, args, out: plot_capacity_vs_decode_fixed(
-                      df, bits=args.bits, errors=args.fixed_errors, out=out,
+                  lambda df, args, bits, out: plot_capacity_vs_decode_fixed(
+                      df, bits=bits, errors=args.fixed_errors, out=out,
                       title_suffix=args.title_suffix)),
 }
+
+
+def _resolve_out_path(plot_key: str, args, bits: int) -> Path:
+    """Compose the output filename: optional _K{N} suffix when --batch-size
+    applies (only the create plot reads K-specific rows), and an optional
+    _bits{N} suffix when --bits is a list with more than one value, so the
+    individual plots don't overwrite each other."""
+    base = PLOT_REGISTRY[plot_key][0]
+    stem, ext = base.rsplit(".", 1)
+    suffix = ""
+    if plot_key == "create" and args.batch_size is not None:
+        suffix += f"_K{args.batch_size}"
+    if len(args.bits) > 1:
+        suffix += f"_bits{bits}"
+    return args.output_dir / f"{stem}{suffix}.{ext}"
 
 
 def _parse_int_list(s: str) -> list[int]:
@@ -414,8 +427,12 @@ def main() -> None:
                         help="one or more TSV files from src/bench")
     parser.add_argument("--output-dir", type=Path, default=Path("."),
                         help="directory for PNG output (default: .)")
-    parser.add_argument("--bits", type=int, default=64,
-                        help="field size to filter on (default: 64)")
+    parser.add_argument("--bits", type=_parse_int_list, default=[64],
+                        metavar="B1,B2,...",
+                        help="comma-separated field sizes to filter on "
+                             "(default: 64). When more than one is given, "
+                             "each plot is rendered once per bits value with "
+                             "_bits{N} appended to the filename.")
     parser.add_argument("--fixed-capacity", type=_parse_int_list, default=None,
                         metavar="C1,C2,...",
                         help="comma-separated capacities for plot #1 "
@@ -445,15 +462,15 @@ def main() -> None:
     print(f"loaded {len(df)} rows from {len(args.inputs)} file(s)")
 
     if "stats" in args.plots:
-        df = compute_stats(df, bits=args.bits)
-        print("computed stats")
-        print(df)
+        for bits in args.bits:
+            compute_stats(df, bits=bits)
         return
 
     selected = PLOT_REGISTRY.keys() if "all" in args.plots else args.plots
-    for key in selected:
-        filename, fn = PLOT_REGISTRY[key]
-        fn(df, args, args.output_dir / filename)
+    for bits in args.bits:
+        for key in selected:
+            _, fn = PLOT_REGISTRY[key]
+            fn(df, args, bits, _resolve_out_path(key, args, bits))
 
 
 if __name__ == "__main__":
