@@ -314,17 +314,29 @@ def _row_aligned_ratio(num: pd.DataFrame, den: pd.DataFrame) -> pd.Series:
     return joined["value_num"] / joined["value_den"]
 
 
-def compute_stats(df: pd.DataFrame, *, bits: int) -> pd.DataFrame:
+def compute_stats(df: pd.DataFrame, *, bits: int,
+                  capacities: list[int] | None = None,
+                  errors: list[int] | None = None) -> pd.DataFrame:
     """Compute speedups within and across implementations at the requested
     field size. Mean ratios across heterogeneous (bits, capacity, errors,
-    data_len) configurations are noisy — fixing a single field size makes
-    each section interpretable. The user can re-run with different --bits
-    values to compare wide-field vs narrow-field behavior."""
+    data_len) configurations are noisy — fixing a single field size, and
+    optionally narrowing to specific capacity / errors values, makes each
+    section interpretable. The user can re-run with different --bits values
+    to compare wide-field vs narrow-field behavior."""
     df = df[df["bits"] == bits]
+    if capacities:
+        df = df[df["capacity"].isin(capacities)]
+    if errors:
+        df = df[df["errors"].isin(errors)]
+    filter_desc = f"bits={bits}"
+    if capacities:
+        filter_desc += f", capacity in {capacities}"
+    if errors:
+        filter_desc += f", errors in {errors}"
     if df.empty:
-        print(f"compute_stats: no rows at bits={bits}")
+        print(f"compute_stats: no rows at {filter_desc}")
         return pd.Series(dtype=float)
-    print(f"\nStats at bits={bits}:")
+    print(f"\nStats at {filter_desc}:")
 
     impls = ["GENERIC", "CLMUL", "CLMUL_TRI"]
 
@@ -463,7 +475,9 @@ def main() -> None:
 
     if "stats" in args.plots:
         for bits in args.bits:
-            compute_stats(df, bits=bits)
+            compute_stats(df, bits=bits,
+                          capacities=args.fixed_capacity,
+                          errors=args.fixed_errors)
         return
 
     selected = PLOT_REGISTRY.keys() if "all" in args.plots else args.plots
