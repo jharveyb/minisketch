@@ -150,6 +150,13 @@ Sweep the number of adds to probe the add-path at different data volumes:
 ./build/bin/bench --sweep --data-sweep --iters=3
 ```
 
+Skip any sketch error recovery; sweep the size of sketch addition batches, to compare batch sizes (currently 1, 2, 4, and 8):
+
+```bash
+# The --*-sweep flags are additive; this sweep over sketch capacities, # of elements added, and field element sizes
+./build/bin/bench --sweep --batch-size-sweep --create-only --data-sweep > bench_add_results.tsv
+```
+
 ### Comparing CLMUL and non-CLMUL hosts
 
 CLMUL support is compiled conditionally (see [`cmake/SystemIntrospection.cmake`](cmake/SystemIntrospection.cmake)) and is gated at runtime via a CPUID check in `src/minisketch.cpp`. To compare a CLMUL-capable host against one without CLMUL, build the binary once on the CLMUL host and run the same binary on both:
@@ -190,4 +197,24 @@ Compute the speedup of the CLMUL implementation vs. the GENERIC one over all (di
 
 ```bash
 uv run plot_bench.py --plots=stats $BENCH_RESULTS
+```
+
+For the `stats` output, the other flags like `fixed-errors` and `fixed-capacity` also work.
+
+Compute the CLMUL speedup for specific element sizes and low error counts:
+
+```bash
+uv run plot_bench.py --fixed-errors 8,16,32 --bits 16,32,48,64 --plots=stats $BENCH_RESULTS
+```
+
+Or for very large sketches with many errors:
+
+```bash
+uv run plot_bench.py --fixed-capacity 4096,6144,8192 --bits 16,32,48,64 --fixed-errors 512,1024,1536 --plots=stats $BENCH_RESULTS
+```
+
+The same flags work to compute the speedup of batched sketch element additions, for multiple batch sizes and multiple implementations (GENERIC vs. CLMUL):
+
+```bash
+uv run plot_bench.py --bits 16,32,48,64 --plots=stats --fixed-capacity 512,1024,2048,4096 $BENCH_ADD_RESULTS
 ```
