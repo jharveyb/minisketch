@@ -35,6 +35,13 @@ FUZZ_TARGET(roundtrip) {
     }
     FUZZ_CHECK(!sketches.empty());
 
+    // Bound the per-input worst case, as in decode.cpp: above capacity 128
+    // only exercise the first and last supported implementations.
+    if (capacity > 128 && sketches.size() > 2) {
+        std::swap(sketches[1], sketches.back());
+        sketches.erase(sketches.begin() + 2, sketches.end());
+    }
+
     // Fix the root-finding basis: freshly constructed sketches seed it from
     // std::random_device, which would make runs non-reproducible.
     uint64_t seed = provider.ConsumeIntegral<uint64_t>();

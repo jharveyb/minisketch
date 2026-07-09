@@ -27,17 +27,25 @@ fi
 printf '%-12s %10s %10s %10s %12s\n' "target" "cov" "ft" "corpus" "execs"
 for target in $TARGETS; do
     workdir="$BUILD_DIR/corpus/$target"
-    mkdir -p "$workdir"
+    artifacts="$BUILD_DIR/artifacts/$target"
+    mkdir -p "$workdir" "$artifacts"
     if [ -d "src/fuzz/corpus/$target" ]; then
         cp -n src/fuzz/corpus/"$target"/* "$workdir/" 2> /dev/null || true
     fi
     log="$BUILD_DIR/fuzz-$target.log"
+    rc=0
     FUZZ="$target" "$BUILD_DIR/bin/fuzz" \
         -max_total_time="$SECONDS_PER_TARGET" -max_len="${FUZZ_MAX_LEN:-4096}" -print_final_stats=1 \
-        ${FUZZ_ARGS:-} "$workdir" > "$log" 2>&1 || {
-            echo "FAILURE in target $target; see $log (crash input saved by libFuzzer)" >&2
-            exit 1
-        }
+        -artifact_prefix="$artifacts/" \
+        ${FUZZ_ARGS:-} "$workdir" > "$log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        if grep -q "run interrupted" "$log"; then
+            echo "Interrupted during target $target (no failure); see $log" >&2
+        else
+            echo "FAILURE in target $target; see $log (crash input saved under $artifacts/)" >&2
+        fi
+        exit "$rc"
+    fi
     cov=$(grep -o 'cov: [0-9]*' "$log" | tail -1 | cut -d' ' -f2)
     ft=$(grep -o 'ft: [0-9]*' "$log" | tail -1 | cut -d' ' -f2)
     execs=$(grep -o 'stat::number_of_executed_units: *[0-9]*' "$log" | grep -o '[0-9]*$')
@@ -45,3 +53,4 @@ for target in $TARGETS; do
 done
 echo
 echo "Working corpora are kept in $BUILD_DIR/corpus/<target>/ and reused across runs."
+echo "Crash and slow-unit artifacts (informational) go to $BUILD_DIR/artifacts/<target>/."
