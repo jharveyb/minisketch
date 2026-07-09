@@ -7,12 +7,12 @@
 #include <algorithm>
 #include <cstdio>
 #include <limits>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "../include/minisketch.h"
+#include "test_utils.h"
 #include "util.h"
 
 namespace {
@@ -123,12 +123,9 @@ void TestExhaustive(uint32_t bits, size_t capacity) {
 }
 
 /** Test properties of sketches with random elements put in. */
-void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter) {
-    std::random_device rnd;
-    std::uniform_int_distribution<uint64_t> capacity_dist(0, std::min<uint64_t>(std::numeric_limits<uint64_t>::max() >> (64 - bits), max_capacity));
-    std::uniform_int_distribution<uint64_t> element_dist(1, std::numeric_limits<uint64_t>::max() >> (64 - bits));
-    std::uniform_int_distribution<uint64_t> rand64(0, std::numeric_limits<uint64_t>::max());
-    std::uniform_int_distribution<int64_t> size_offset_dist(-3, 3);
+void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter, TestRand& rnd) {
+    const uint64_t max_capacity_bits = std::min<uint64_t>(std::numeric_limits<uint64_t>::max() >> (64 - bits), max_capacity);
+    const uint64_t max_element = std::numeric_limits<uint64_t>::max() >> (64 - bits);
 
     std::vector<uint64_t> decode_0;
     std::vector<uint64_t> decode_other;
@@ -137,7 +134,7 @@ void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter) {
 
     for (size_t i = 0; i < iter; ++i) {
         // Determine capacity, and construct Minisketch objects for all implementations.
-        uint64_t capacity = capacity_dist(rnd);
+        uint64_t capacity = rnd.RandIncl(0, max_capacity_bits);
         auto sketches = CreateSketches(bits, capacity);
         // Sanity checks
         if (sketches.empty()) return;
@@ -147,11 +144,11 @@ void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter) {
             CHECK(sketches[impl].GetSerializedSize() == sketches[0].GetSerializedSize());
         }
         // Determine the number of elements, and create a vector to store them in.
-        size_t element_count = std::max<int64_t>(0, std::max<int64_t>(0, capacity + size_offset_dist(rnd)));
+        size_t element_count = std::max<int64_t>(0, (int64_t)capacity + (int64_t)rnd.RandIncl(0, 6) - 3);
         elements.resize(element_count);
         // Add the elements to all sketches
         for (size_t j = 0; j < element_count; ++j) {
-            uint64_t elem = element_dist(rnd);
+            uint64_t elem = rnd.RandIncl(1, max_element);
             CHECK(elem != 0);
             elements[j] = elem;
             for (auto& sketch : sketches) sketch.Add(elem);
@@ -269,9 +266,10 @@ void TestComputeFunctions() {
 
 int main(int argc, char** argv) {
     uint64_t test_complexity = 4;
-    if (argc > 1) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg{argv[i]};
+        if (arg.compare(0, 7, "--seed=") == 0) continue; // Handled by GetTestSeed.
         size_t len = 0;
-        std::string arg{argv[1]};
         try {
             test_complexity = 0;
             long long complexity = std::stoll(arg, &len);
@@ -285,6 +283,8 @@ int main(int argc, char** argv) {
         }
     }
 
+    TestRand rng(GetTestSeed(argc, argv));
+
 #ifdef MINISKETCH_VERIFY
     const char* mode = " in verify mode";
 #else
@@ -295,9 +295,9 @@ int main(int argc, char** argv) {
     TestComputeFunctions();
 
     for (unsigned j = 2; j <= 64; ++j) {
-        TestRandomized(j, 8, (test_complexity << 10) / j);
-        TestRandomized(j, 128, (test_complexity << 7) / j);
-        TestRandomized(j, 4096, test_complexity / j);
+        TestRandomized(j, 8, (test_complexity << 10) / j, rng);
+        TestRandomized(j, 128, (test_complexity << 7) / j, rng);
+        TestRandomized(j, 4096, test_complexity / j, rng);
     }
 
     // Test capacity==0 together with all field sizes, and then
