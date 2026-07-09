@@ -82,6 +82,24 @@ if(MINISKETCH_BUILD_TESTS)
   else()
     message(WARNING "Boost.Test (unit_test_framework) not found; the unit-tests target will not be built.")
   endif()
+
+  # Python test suites: pyminisketch's own unit tests, and a differential
+  # test comparing the C library against the pure-Python reimplementation
+  # through a shared library loaded with ctypes.
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND AND NOT WIN32)
+    add_library(minisketch-testlib SHARED minisketch.cpp)
+    set_target_properties(minisketch-testlib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(minisketch-testlib PRIVATE minisketch_field_sources)
+
+    add_test(NAME ${PROJECT_NAME}_pyminisketch
+      COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/tests/pyminisketch.py
+    )
+    add_test(NAME ${PROJECT_NAME}_differential
+      COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/tests/differential.py
+        --lib $<TARGET_FILE:minisketch-testlib>
+    )
+  endif()
 endif()
 
 if(MINISKETCH_BUILD_BENCHMARK)
