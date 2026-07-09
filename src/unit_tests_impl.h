@@ -136,6 +136,9 @@ void TestFieldSerialization(const F& field, TestRand& rng, size_t iters) {
 /* ---------- Polynomial operation properties ---------- */
 
 template<typename F>
+std::vector<typename F::Elem> TraceModRefImpl(const std::vector<typename F::Elem>& tmod, typename F::Elem param, const F& field);
+
+template<typename F>
 void TestPolyOps(const F& field, TestRand& rng, size_t iters, size_t maxdeg) {
     typedef typename F::Elem Elem;
     for (size_t i = 0; i < iters; ++i) {
@@ -200,21 +203,82 @@ void TestPolyOps(const F& field, TestRand& rng, size_t iters, size_t maxdeg) {
         UT_REQUIRE(d_copy.empty());
 
         // TraceMod against a naive reference: sum of (param*x)^(2^i) mod `mod`,
-        // computed with schoolbook squarings and naive reduction.
-        auto tmod = RandMonicPoly(rng, field, 2 + rng.RandRange(maxdeg));
+        // computed with schoolbook squarings and naive reduction. The
+        // fast_tracemod_reducers API precomputes per modulus (degree >= 3);
+        // this exercises the square-table reducer path.
+        auto tmod = RandMonicPoly(rng, field, 4 + rng.RandRange(maxdeg));
         Elem param = RandNonzeroElem(rng, field);
         std::vector<Elem> trace;
-        TraceMod(tmod, trace, param, field);
-        std::vector<Elem> cur{0, param};
+        TraceMod<F> trace_mod(tmod, field);
+        trace_mod.trace(trace, param);
+        UT_REQUIRE(Stripped(trace) == TraceModRefImpl(tmod, param, field));
+    }
+}
+
+/** Naive TraceMod reference: sum of (param*x)^(2^i) mod `mod`. */
+template<typename F>
+std::vector<typename F::Elem> TraceModRefImpl(const std::vector<typename F::Elem>& tmod, typename F::Elem param, const F& field) {
+    typedef typename F::Elem Elem;
+    std::vector<Elem> cur{0, param};
+    PolyReduceRef(cur, tmod, field);
+    std::vector<Elem> acc = cur;
+    for (int bit = 1; bit < field.Bits(); ++bit) {
+        cur = PolyMulRef(cur, cur, field);
         PolyReduceRef(cur, tmod, field);
-        std::vector<Elem> acc = cur;
-        for (int bit = 1; bit < field.Bits(); ++bit) {
-            cur = PolyMulRef(cur, cur, field);
-            PolyReduceRef(cur, tmod, field);
-            acc.resize(std::max(acc.size(), cur.size()), 0);
-            for (size_t j = 0; j < cur.size(); ++j) acc[j] ^= cur[j];
-        }
-        UT_REQUIRE(Stripped(trace) == Stripped(acc));
+        acc.resize(std::max(acc.size(), cur.size()), 0);
+        for (size_t j = 0; j < cur.size(); ++j) acc[j] ^= cur[j];
+    }
+    return Stripped(acc);
+}
+
+/** Properties of the fast_tracemod_reducers building blocks: Karatsuba
+ *  multiplication, the Newton inverse power series, and the reciprocal
+ *  (large-degree) TraceMod path. */
+template<typename F>
+void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
+    typedef typename F::Elem Elem;
+    for (size_t i = 0; i < iters; ++i) {
+        // Karatsuba full/low products against schoolbook, at sizes crossing
+        // TRACEMOD_POLYMUL_CUTOFF.
+        auto a = RandPoly(rng, field, 1 + rng.RandRange(80));
+        auto b = RandPoly(rng, field, 1 + rng.RandRange(80));
+        std::vector<Elem> full;
+        TraceModPolyMulFull(a, b, full, field);
+        UT_REQUIRE(Stripped(full) == PolyMulRef(a, b, field));
+
+        size_t n = 1 + rng.RandRange(80);
+        std::vector<Elem> low;
+        TraceModPolyMulLow(a, b, low, n, field);
+        auto ref = PolyMulRef(a, b, field);
+        ref.resize(n, 0);
+        UT_REQUIRE(Stripped(low) == Stripped(ref));
+
+        // f(x)*g(x)^2 mod x^n.
+        auto fg2 = TraceModMulBySquareLow(a, b, n, field);
+        auto ref2 = PolyMulRef(a, PolyMulRef(b, b, field), field);
+        ref2.resize(n, 0);
+        UT_REQUIRE(Stripped(fg2) == Stripped(ref2));
+
+        // Newton inverse: f * (1/f mod x^k) == 1 mod x^k, for f with f(0)=1.
+        auto f = RandPoly(rng, field, 1 + rng.RandRange(40));
+        f[0] = 1;
+        size_t k = 1 + rng.RandRange(40);
+        auto inv = TraceModInvSeries(f, k, field);
+        auto prod = PolyMulRef(f, inv, field);
+        prod.resize(std::max(prod.size(), k), 0);
+        for (size_t j = 0; j < k; ++j) UT_REQUIRE(prod[j] == (j == 0 ? 1 : 0));
+    }
+
+    // The reciprocal reducer path (degree >= TRACEMOD_TABLE_CUTOFF) against
+    // the naive reference; only for one cheap field, as the reference is
+    // quadratic in the degree.
+    if (field.Bits() == 11) {
+        auto tmod = RandMonicPoly(rng, field, TRACEMOD_TABLE_CUTOFF + 2);
+        Elem param = RandNonzeroElem(rng, field);
+        TraceMod<F> trace_mod(tmod, field);
+        std::vector<Elem> out;
+        trace_mod.trace(out, param);
+        UT_REQUIRE(Stripped(out) == TraceModRefImpl(tmod, param, field));
     }
 }
 
@@ -356,6 +420,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestFieldOps(field, lowmod, rng, 4000);
     TestFieldSerialization(field, rng, 128);
     TestPolyOps(field, rng, 256, 12);
+    TestTraceModReducers(field, rng, 24);
     TestSyndromes(field, lowmod, rng, 128, 12);
     TestBerlekampMassey(field, rng, 128, 10);
     TestFindRoots(field, lowmod, rng, 64, 8);
