@@ -34,9 +34,18 @@ cmake --build build-fuzz -j
 FUZZ=decode ./build-fuzz/bin/fuzz -max_len=512 build-fuzz/corpus/decode src/fuzz/corpus/decode
 ```
 
-Fuzz targets: `decode`, `roundtrip`, `poly_ops` (run the binary without `FUZZ`
-set to list them). Each also runs as a short smoke test under plain `ctest` in
-a fuzz build.
+Fuzz targets: `decode`, `roundtrip`, `poly_ops`, and `reconcile` (a two-party
+set-reconciliation scenario adapted from Bitcoin Core's
+`src/test/fuzz/minisketch.cpp`, with 32-bit elements and capacities up to
+200). Run the binary without `FUZZ` set to list them. Each also runs as a
+short smoke test under plain `ctest` in a fuzz build.
+
+Fuzz targets are fully deterministic: fuzz builds define
+`MINISKETCH_FUZZ_DETERMINISTIC`, which replaces the `std::random_device`
+basis draw in sketch construction with a fixed value (production builds are
+unaffected), and the targets set an input-derived basis via `SetSeed()`.
+Running the same input twice produces identical behavior and coverage, so
+crashes always replay.
 
 ## Reproducing failures
 

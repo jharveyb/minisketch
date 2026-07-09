@@ -45,6 +45,11 @@ FUZZ_TARGET(decode) {
     auto sketches = CreateAll(bits, capacity);
     FUZZ_CHECK(!sketches.empty()); // Implementation 0 always exists for supported field sizes.
 
+    // Fix the root-finding basis: freshly constructed sketches seed it from
+    // std::random_device, which would make runs non-reproducible.
+    uint64_t seed = provider.ConsumeIntegral<uint64_t>();
+    for (auto& sketch : sketches) sketch.SetSeed(seed);
+
     // The remaining bytes are the serialized sketch (zero-padded if short).
     std::vector<unsigned char> serialized = provider.ConsumeBytes<unsigned char>(sketches[0].GetSerializedSize());
     serialized.resize(sketches[0].GetSerializedSize(), 0);
@@ -86,6 +91,7 @@ FUZZ_TARGET(decode) {
         }
         // Re-encoding the decoded set must reproduce the sketch.
         Minisketch rebuilt(bits, 0, capacity);
+        rebuilt.SetSeed(seed);
         for (uint64_t elem : decode0) rebuilt.Add(elem);
         FUZZ_CHECK(rebuilt.Serialize() == canonical);
     }

@@ -115,6 +115,7 @@ if(MINISKETCH_BUILD_FUZZ)
     fuzz/decode.cpp
     fuzz/roundtrip.cpp
     fuzz/poly_ops.cpp
+    fuzz/reconcile.cpp
   )
   target_compile_definitions(fuzz PRIVATE MINISKETCH_VERIFY)
   set_target_properties(fuzz PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
@@ -123,7 +124,7 @@ if(MINISKETCH_BUILD_FUZZ)
 
   # Smoke tests: a short bounded run of each target so plain `ctest` exercises
   # them (real fuzzing sessions run the binary directly with a corpus dir).
-  foreach(fuzz_target decode roundtrip poly_ops)
+  foreach(fuzz_target decode roundtrip poly_ops reconcile)
     add_test(NAME ${PROJECT_NAME}_fuzz_${fuzz_target}_smoke
       COMMAND fuzz -runs=2000 -max_len=512 -seed=1
     )

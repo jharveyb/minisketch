@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SECONDS_PER_TARGET="${1:-60}"
 BUILD_DIR="${2:-build-fuzz}"
-TARGETS="${FUZZ_TARGETS:-decode roundtrip poly_ops}"
+TARGETS="${FUZZ_TARGETS:-decode roundtrip poly_ops reconcile}"
 
 if [ ! -x "$BUILD_DIR/bin/fuzz" ]; then
     echo "error: $BUILD_DIR/bin/fuzz not found." >&2

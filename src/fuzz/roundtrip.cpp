@@ -33,6 +33,11 @@ FUZZ_TARGET(roundtrip) {
     }
     FUZZ_CHECK(!sketches.empty());
 
+    // Fix the root-finding basis: freshly constructed sketches seed it from
+    // std::random_device, which would make runs non-reproducible.
+    uint64_t seed = provider.ConsumeIntegral<uint64_t>();
+    for (auto& sketch : sketches) sketch.SetSeed(seed);
+
     // Consume elements (duplicates allowed; pairs cancel out in the sketch).
     std::vector<uint64_t> elements;
     while (elements.size() < 24 && provider.remaining_bytes() > 0) {
@@ -62,6 +67,8 @@ FUZZ_TARGET(roundtrip) {
     // the whole multiset (syndromes are additive).
     size_t split = provider.ConsumeIntegralInRange<size_t>(0, elements.size());
     Minisketch part_a(bits, 0, capacity), part_b(bits, 0, capacity);
+    part_a.SetSeed(seed);
+    part_b.SetSeed(seed);
     for (size_t i = 0; i < elements.size(); ++i) {
         (i < split ? part_a : part_b).Add(elements[i]);
     }
@@ -90,6 +97,7 @@ FUZZ_TARGET(roundtrip) {
         // Over capacity: decoding may fail, or may return some set whose
         // sketch is identical to the input sketch (self-consistency).
         Minisketch rebuilt(bits, 0, capacity);
+        rebuilt.SetSeed(seed);
         for (uint64_t elem : decoded) rebuilt.Add(elem);
         FUZZ_CHECK(rebuilt.Serialize() == serialized);
     }
