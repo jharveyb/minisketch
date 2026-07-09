@@ -31,7 +31,12 @@ configure
 libtool
 stamp-h1
 
-test*
+# Autotools-built binaries and logs in the source root.
+/test
+/test-verify
+/test*.log
+/test*.trs
+/test_env.log
 bench
 
 # CMake build directories.
