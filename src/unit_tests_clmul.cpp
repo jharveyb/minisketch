@@ -69,4 +69,16 @@ MINISKETCH_CLMUL_FIELD_TEST(clmul_field_27, Field27)
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_32, Field32)
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_64, Field64)
 
+/* Full decode pipeline at capacity 1024 with 64-bit elements (the intended
+ * practical configuration). */
+BOOST_AUTO_TEST_CASE(clmul_field_64_capacity_1024) {
+    if (!ClmulSupported()) {
+        BOOST_TEST_MESSAGE("CPU lacks CLMUL support; skipping");
+        return;
+    }
+    Field64 field;
+    TestRand rng(g_test_seed + 64002);
+    ut::TestDecodeStagesLarge(field, rng, 1024);
+}
+
 #endif // HAVE_CLMUL

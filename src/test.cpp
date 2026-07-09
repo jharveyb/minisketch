@@ -123,8 +123,9 @@ void TestExhaustive(uint32_t bits, size_t capacity) {
 }
 
 /** Test properties of sketches with random elements put in. */
-void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter, TestRand& rnd) {
+void TestRandomized(uint32_t bits, size_t min_capacity, size_t max_capacity, size_t iter, TestRand& rnd) {
     const uint64_t max_capacity_bits = std::min<uint64_t>(std::numeric_limits<uint64_t>::max() >> (64 - bits), max_capacity);
+    const uint64_t min_capacity_bits = std::min<uint64_t>(min_capacity, max_capacity_bits);
     const uint64_t max_element = std::numeric_limits<uint64_t>::max() >> (64 - bits);
 
     std::vector<uint64_t> decode_0;
@@ -134,7 +135,7 @@ void TestRandomized(uint32_t bits, size_t max_capacity, size_t iter, TestRand& r
 
     for (size_t i = 0; i < iter; ++i) {
         // Determine capacity, and construct Minisketch objects for all implementations.
-        uint64_t capacity = rnd.RandIncl(0, max_capacity_bits);
+        uint64_t capacity = rnd.RandIncl(min_capacity_bits, max_capacity_bits);
         auto sketches = CreateSketches(bits, capacity);
         // Sanity checks
         if (sketches.empty()) return;
@@ -353,9 +354,17 @@ int main(int argc, char** argv) {
     TestComputeFunctions();
 
     for (unsigned j = 2; j <= 64; ++j) {
-        TestRandomized(j, 8, (test_complexity << 10) / j, rng);
-        TestRandomized(j, 128, (test_complexity << 7) / j, rng);
-        TestRandomized(j, 4096, test_complexity / j, rng);
+        TestRandomized(j, 0, 8, (test_complexity << 10) / j, rng);
+        TestRandomized(j, 0, 128, (test_complexity << 7) / j, rng);
+        TestRandomized(j, 0, 4096, test_complexity / j, rng);
+    }
+
+    // The tier above yields 0 iterations for larger field sizes at low
+    // complexity, so large capacities would never be exercised for the wide
+    // fields. Guarantee at least one large-capacity iteration for the
+    // practically-relevant sizes (this is the slowest part of the test).
+    for (unsigned j : {32u, 64u}) {
+        TestRandomized(j, 512, 1024, std::max<uint64_t>(1, test_complexity / 4), rng);
     }
 
     // Test capacity==0 together with all field sizes, and then

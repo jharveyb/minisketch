@@ -33,7 +33,7 @@ for target in $TARGETS; do
     fi
     log="$BUILD_DIR/fuzz-$target.log"
     FUZZ="$target" "$BUILD_DIR/bin/fuzz" \
-        -max_total_time="$SECONDS_PER_TARGET" -max_len=512 -print_final_stats=1 \
+        -max_total_time="$SECONDS_PER_TARGET" -max_len="${FUZZ_MAX_LEN:-4096}" -print_final_stats=1 \
         ${FUZZ_ARGS:-} "$workdir" > "$log" 2>&1 || {
             echo "FAILURE in target $target; see $log (crash input saved by libFuzzer)" >&2
             exit 1

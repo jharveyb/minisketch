@@ -36,9 +36,31 @@ FUZZ=decode ./build-fuzz/bin/fuzz -max_len=512 build-fuzz/corpus/decode src/fuzz
 
 Fuzz targets: `decode`, `roundtrip`, `poly_ops`, and `reconcile` (a two-party
 set-reconciliation scenario adapted from Bitcoin Core's
-`src/test/fuzz/minisketch.cpp`, with 32-bit elements and capacities up to
-200). Run the binary without `FUZZ` set to list them. Each also runs as a
-short smoke test under plain `ctest` in a fuzz build.
+`src/test/fuzz/minisketch.cpp`, with 32- or 64-bit elements). Run the binary
+without `FUZZ` set to list them. Each also runs as a short smoke test under
+plain `ctest` in a fuzz build.
+
+## Capacity and field-size coverage
+
+Decode cost grows quadratically with capacity (a full 64-bit decode measures
+~60ms at capacity 256, ~0.8s at 1024, uninstrumented), so each layer trades
+depth for iteration count deliberately:
+
+| Layer | Capacity / degree | Field sizes |
+| --- | --- | --- |
+| `TestExhaustive` | bits×capacity ≤ ~40 | all |
+| `TestRandomized` | 0–8 / 0–128 / 0–4096 tiers, plus a guaranteed 512–1024 tier | all; large tier: 32, 64 |
+| unit tests, reference-checked properties | degree ≤ 12 (quadratic naive references) | 2–8 exhaustive, 11/16/27/32/64 |
+| unit tests, `TestDecodeStagesLarge` (reference-free) | 256 per field; **1024** for the 64-bit field | same |
+| fuzz `decode`/`roundtrip` | log-uniform 1–1024 | 2–64 |
+| fuzz `reconcile` | log-uniform 1–1024 | 32, 64 |
+| fuzz `poly_ops` | degree ≤ 24 (referenced) + log-uniform ≤ 256 root sets (reference-free) | 11, 32 |
+| `differential.py` | ≤ 16 (pure-Python decode cost) | 2–16, 32, 64 |
+
+The 64-bit field — the practically relevant element size — is covered at
+every layer, including full-capacity-1024 decode in both the unit suite (both
+generic and clmul implementations) and the guaranteed large tier of the
+end-to-end tests.
 
 Fuzz targets are fully deterministic: fuzz builds define
 `MINISKETCH_FUZZ_DETERMINISTIC`, which replaces the `std::random_device`

@@ -347,6 +347,30 @@ void TestFindRoots(const F& field, uint64_t lowmod, TestRand& rng, size_t iters,
     }
 }
 
+/** Reference-free decode-stage roundtrip, cheap enough for large capacities:
+ *  the syndromes of `count` random distinct roots must produce a
+ *  BerlekampMassey polynomial of degree exactly `count` whose reversal's
+ *  roots are exactly the input set. This is the whole decode pipeline at
+ *  full capacity, without the quadratic naive references. */
+template<typename F>
+void TestDecodeStagesLarge(const F& field, TestRand& rng, size_t count) {
+    typedef typename F::Elem Elem;
+    const int bits = field.Bits();
+    const uint64_t field_size = bits >= 20 ? (uint64_t{1} << 20) : (uint64_t{1} << bits);
+    count = std::min<uint64_t>(count, field_size - 1);
+    auto roots = RandDistinctElems(rng, field, count);
+    std::vector<Elem> osyn(count, 0);
+    for (auto e : roots) AddToOddSyndromes(osyn, e, field);
+    auto syndromes = ReconstructAllSyndromes(osyn, field);
+    auto poly = BerlekampMassey(syndromes, count, field);
+    UT_REQUIRE(poly.size() == count + 1);
+    std::reverse(poly.begin(), poly.end());
+    auto found = FindRoots(poly, field.FromSeed(rng.Rand64()), field);
+    std::sort(found.begin(), found.end());
+    std::sort(roots.begin(), roots.end());
+    UT_REQUIRE(found == roots);
+}
+
 /** Run every property group against one field instantiation. */
 template<typename F>
 void RunAllFieldTests(uint64_t seed_offset) {
@@ -359,6 +383,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestSyndromes(field, lowmod, rng, 128, 12);
     TestBerlekampMassey(field, rng, 128, 10);
     TestFindRoots(field, lowmod, rng, 64, 8);
+    TestDecodeStagesLarge(field, rng, 256);
 }
 
 } // namespace ut
