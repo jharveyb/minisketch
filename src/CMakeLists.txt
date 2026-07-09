@@ -89,6 +89,32 @@ if(MINISKETCH_BUILD_BENCHMARK)
   target_link_libraries(bench PRIVATE minisketch)
 endif()
 
+if(MINISKETCH_BUILD_FUZZ)
+  # One fuzz binary containing all targets (select with the FUZZ env var),
+  # linked against the verify library so CHECK_SAFE assertions fire.
+  add_executable(fuzz
+    fuzz/fuzz.cpp
+    fuzz/decode.cpp
+    fuzz/roundtrip.cpp
+    fuzz/poly_ops.cpp
+  )
+  target_compile_definitions(fuzz PRIVATE MINISKETCH_VERIFY)
+  set_target_properties(fuzz PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+  target_link_libraries(fuzz PRIVATE minisketch_verify)
+  target_link_options(fuzz PRIVATE -fsanitize=fuzzer)
+
+  # Smoke tests: a short bounded run of each target so plain `ctest` exercises
+  # them (real fuzzing sessions run the binary directly with a corpus dir).
+  foreach(fuzz_target decode roundtrip poly_ops)
+    add_test(NAME ${PROJECT_NAME}_fuzz_${fuzz_target}_smoke
+      COMMAND fuzz -runs=2000 -max_len=512 -seed=1
+    )
+    set_tests_properties(${PROJECT_NAME}_fuzz_${fuzz_target}_smoke
+      PROPERTIES ENVIRONMENT FUZZ=${fuzz_target}
+    )
+  endforeach()
+endif()
+
 if(MINISKETCH_INSTALL)
   include(GNUInstallDirs)
   install(TARGETS minisketch)
