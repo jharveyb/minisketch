@@ -8,7 +8,7 @@ finding, TraceMod reduction, ...) can be swapped out and validated quickly.
 ## Test taxonomy
 
 | Layer | Binary / entry point | What it checks | Oracle |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Exhaustive | `test-noverify` / `test-verify` (`src/test.cpp`, `TestExhaustive`) | every sketch for small bits×capacity | cross-implementation agreement, re-encode identity, decodable-count = C(2^bits−1, i) |
 | Randomized end-to-end | same binaries (`TestRandomized`) | random sets through the public API | cross-implementation agreement, serialize roundtrip, exact recovery within capacity |
 | Parameter functions | same binaries (`TestComputeFunctions`) | `minisketch_compute_capacity` / `max_elements` | monotonicity, bounds, roundtripping |
@@ -42,7 +42,7 @@ a fuzz build.
 
 Every randomized test prints its seed at startup:
 
-```
+```text
 Test seed: 0x00000000deadbeef (reproduce with --seed=... or MINISKETCH_TEST_SEED)
 ```
 
@@ -93,7 +93,7 @@ they exercise a separately-built library). Baseline as of 2026-07 (complexity
 4, all field sizes, clmul enabled):
 
 | File | Lines | Branches |
-|---|---|---|
+| --- | --- | --- |
 | `src/sketch_impl.h` | 94.3% | 83.1% |
 | `src/minisketch.cpp` | 87.7% | 91.0% |
 | `src/int_utils.h` | 92.0% | 81.8% |
@@ -127,3 +127,18 @@ quality bar for this suite: flipping an operator or an index in
 `sketch_impl.h` (e.g. the discrepancy XOR in `BerlekampMassey`) should be
 caught by the `unit-tests` binary in under a second. When adding new algorithm
 code, plant a bug and confirm a test notices before trusting the green run.
+
+Results so far (2026-07):
+
+- master: flipping the discrepancy XOR to OR in `BerlekampMassey` — caught by
+  23 of 24 unit-test cases.
+- `fast_tracemod_reducers` cherry-picked onto this suite (see the
+  `tracemod-check` branch, which also carries the test adaptation to the new
+  `TraceMod<F>` class API and added properties for
+  `TraceModPolyMulFull/Low`, `TraceModMulBySquareLow`, `TraceModInvSeries`,
+  and the reciprocal reducer path): 5 planted mutations — dropped coefficient
+  squaring in `SquareReduce`, a stale shift value in the square-table build,
+  off-by-one quotient and remainder lengths in `ReciprocalReduce`, and a
+  dropped Karatsuba middle-term correction — were each caught by `unit-tests`
+  within seconds, at the failing property, while the full suite passes on the
+  unmutated branch.
