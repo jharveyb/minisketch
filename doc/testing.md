@@ -112,10 +112,10 @@ tools/fuzz_stats.sh 60       # 60 seconds per target
 
 Reports libFuzzer edge coverage (`cov:`), features (`ft:`), corpus size and
 executions per target, keeping a persistent working corpus under
-`build-fuzz/corpus/`. Reference numbers after ~75s per target on one core
-(2026-07): decode cov≈28000, roundtrip cov≈27300, poly_ops cov≈1000 (the
-poly_ops target only instantiates two generic fields, hence the smaller
-denominator).
+`build-fuzz/corpus/`. Reference numbers after ~5 minutes per target on one
+core (2026-07): decode cov≈28500, roundtrip cov≈29200, poly_ops cov≈1000
+(the poly_ops target only instantiates two generic fields, hence the smaller
+denominator), no failures across ~500k executions.
 
 A small seed corpus is committed under `src/fuzz/corpus/<target>/` so short CI
 runs start from meaningful inputs; long local runs grow the working corpus.
