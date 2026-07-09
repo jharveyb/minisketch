@@ -39,7 +39,10 @@ if(DEFINED CMAKE_CXX_STANDARD)
     message(FATAL_ERROR "This project requires at least C++11")
   endif()
 else()
-  set(CMAKE_CXX_STANDARD 11)
+  # The library sources remain C++11-compatible; build everything as C++20 by
+  # default (like Bitcoin Core). This also keeps all test binaries on one
+  # standard, so llvm-cov profiles merge without mismatched inline variants.
+  set(CMAKE_CXX_STANDARD 20)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT DEFINED CMAKE_CXX_EXTENSIONS)

@@ -4,13 +4,14 @@
 # Usage: tools/coverage.sh [build-dir]
 #
 # Note: llvm-cov prints "warning: N functions have mismatched data". This is
-# benign: the report merges profiles from binaries that compile the same
-# inline functions under different configurations (MINISKETCH_VERIFY on/off,
-# C++11 vs C++20), so for a handful of tiny inline helpers (TestRand::*,
-# Sketch::Ready() etc.) the record from one binary does not structurally
-# match another binary's compilation of it and is skipped in that binary's
-# view. Every such function is still counted from the binary where it is
-# actually exercised; the report numbers are unaffected.
+# benign: the report merges profiles from several binaries that share inline
+# functions from common headers, but each binary only *calls* a subset of
+# them (e.g. TestRand::RandBits only in unit-tests, Sketch::Ready() only in
+# the test binaries). Clang emits coverage records for uncalled inline
+# functions under a pseudo-hash, so the merged profile holds a "used" and an
+# "unused" record under one symbol name and llvm-cov skips the non-matching
+# one in each binary's view. Every such function is still counted from the
+# binary that actually exercises it; the report numbers are unaffected.
 #
 # Configures a dedicated build directory with profile instrumentation, builds
 # the library and all test binaries, runs the test suite via ctest, and writes

@@ -48,6 +48,16 @@ FUZZ_TARGET(decode) {
     auto sketches = CreateAll(bits, capacity);
     FUZZ_CHECK(!sketches.empty()); // Implementation 0 always exists for supported field sizes.
 
+    // Decode cost is roughly quadratic in capacity and is paid once per
+    // implementation (worst case: a near-full-degree non-factorizable
+    // polynomial costs seconds at capacity 1024 under sanitizers). Above
+    // capacity 128, keep only the first and last supported implementations
+    // (generic + the best clmul variant) so worst-case inputs stay tractable.
+    if (capacity > 128 && sketches.size() > 2) {
+        std::swap(sketches[1], sketches.back());
+        sketches.erase(sketches.begin() + 2, sketches.end());
+    }
+
     // Fix the root-finding basis: freshly constructed sketches seed it from
     // std::random_device, which would make runs non-reproducible.
     uint64_t seed = provider.ConsumeIntegral<uint64_t>();
