@@ -66,6 +66,9 @@ if(MINISKETCH_BUILD_FUZZ)
   # through all code, not just the harness. Use a dedicated build directory.
   add_compile_options(-fsanitize=fuzzer-no-link,address,undefined -fno-sanitize-recover=all -g -O1)
   add_link_options(-fsanitize=address,undefined)
+  # Make sketch construction entropy-free so fuzz runs are reproducible; the
+  # fuzz targets set input-derived bases via SetSeed().
+  add_compile_definitions(MINISKETCH_FUZZ_DETERMINISTIC)
 endif()
 
 set(supported_fields "")

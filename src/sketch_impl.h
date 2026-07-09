@@ -361,9 +361,16 @@ class SketchImpl final : public Sketch
 public:
     template<typename... Args>
     SketchImpl(int implementation, int bits, const Args&... args) : Sketch(implementation, bits), m_field(args...) {
+#ifdef MINISKETCH_FUZZ_DETERMINISTIC
+        // Fuzz builds only: never draw entropy, so that fuzz input -> behavior
+        // is a pure function. Fuzz targets override the basis per input with
+        // SetSeed(); this fixed value only covers construction itself.
+        m_basis = m_field.FromSeed(0x6d696e69736b6574 /* "minisket" */);
+#else
         std::random_device rng;
         std::uniform_int_distribution<uint64_t> dist;
         m_basis = m_field.FromSeed(dist(rng));
+#endif
     }
 
     size_t Syndromes() const override { return m_syndromes.size(); }
