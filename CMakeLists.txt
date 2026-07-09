@@ -56,6 +56,17 @@ endif()
 
 option(MINISKETCH_BUILD_TESTS "Build tests." ON)
 option(MINISKETCH_BUILD_BENCHMARK "Build benchmark." OFF)
+option(MINISKETCH_BUILD_FUZZ "Build libFuzzer fuzz targets (requires Clang); instruments the whole build with fuzzer,address,undefined sanitizers." OFF)
+
+if(MINISKETCH_BUILD_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "MINISKETCH_BUILD_FUZZ requires Clang (libFuzzer). Configure with -DCMAKE_CXX_COMPILER=clang++.")
+  endif()
+  # Instrument everything (including the library) so fuzzing is coverage-guided
+  # through all code, not just the harness. Use a dedicated build directory.
+  add_compile_options(-fsanitize=fuzzer-no-link,address,undefined -fno-sanitize-recover=all -g -O1)
+  add_link_options(-fsanitize=address,undefined)
+endif()
 
 set(supported_fields "")
 set(have_enabled_fields NO)
