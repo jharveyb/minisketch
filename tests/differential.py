@@ -208,10 +208,13 @@ def main():
     if os.path.exists(golden):
         check_golden(lib, golden)
 
-    # Small parameters decode fast in pure Python; the C++ side is fully
-    # random-tested elsewhere, this is about implementation agreement.
+    # Small capacities decode fast enough in pure Python; the C++ side is
+    # fully random-tested elsewhere, this is about implementation agreement.
+    # Include the practically-relevant wide fields (32/64 bits) alongside the
+    # exhaustive small-field range.
+    field_sizes = list(range(2, 17)) + [32, 64]
     for i in range(args.iters):
-        bits = rng.randrange(2, 17)
+        bits = rng.choice(field_sizes)
         capacity = rng.randrange(0, 17)
         run_case(lib, bits, capacity, rng)
     print(f"{args.iters} differential cases OK")

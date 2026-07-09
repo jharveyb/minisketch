@@ -180,6 +180,28 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
             }
         }
     }
+
+    // Large-degree decode stages, reference-free (the naive references above
+    // are quadratic, so they stay small): syndromes of a root set must
+    // BerlekampMassey to a polynomial of exactly that degree whose reversal's
+    // roots are exactly the set. Root count is log-uniform up to 256.
+    {
+        size_t want = size_t{1} << provider.ConsumeIntegralInRange<int>(0, 8);
+        auto roots = ConsumeDistinctElems(provider, field, want);
+        if (!roots.empty()) {
+            std::vector<Elem> osyn(roots.size(), 0);
+            for (auto m : roots) AddToOddSyndromes(osyn, m, field);
+            auto syndromes = ReconstructAllSyndromes(osyn, field);
+            auto poly = BerlekampMassey(syndromes, roots.size(), field);
+            FUZZ_CHECK(poly.size() == roots.size() + 1);
+            std::reverse(poly.begin(), poly.end());
+            Elem basis = static_cast<Elem>(provider.ConsumeIntegralInRange<uint64_t>(1, max_elem));
+            auto found = FindRoots(poly, basis, field);
+            std::sort(found.begin(), found.end());
+            std::sort(roots.begin(), roots.end());
+            FUZZ_CHECK(found == roots);
+        }
+    }
 }
 
 } // namespace

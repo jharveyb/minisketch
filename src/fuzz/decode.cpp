@@ -40,7 +40,10 @@ FUZZ_TARGET(decode) {
     FuzzedDataProvider provider(data, size);
     uint32_t bits = provider.ConsumeIntegralInRange<uint32_t>(2, 64);
     if (!Minisketch::BitsSupported(bits)) return;
-    size_t capacity = provider.ConsumeIntegralInRange<size_t>(1, 24);
+    // Log-uniform capacity in [1, 1024]: an octave, then a value within it,
+    // so small (fast) capacities dominate but high-degree decoding is reached.
+    size_t cap_lo = size_t{1} << provider.ConsumeIntegralInRange<int>(0, 10);
+    size_t capacity = provider.ConsumeIntegralInRange<size_t>(cap_lo, std::min<size_t>(2 * cap_lo - 1, 1024));
 
     auto sketches = CreateAll(bits, capacity);
     FUZZ_CHECK(!sketches.empty()); // Implementation 0 always exists for supported field sizes.

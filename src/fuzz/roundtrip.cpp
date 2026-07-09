@@ -22,7 +22,9 @@ FUZZ_TARGET(roundtrip) {
     FuzzedDataProvider provider(data, size);
     uint32_t bits = provider.ConsumeIntegralInRange<uint32_t>(2, 64);
     if (!Minisketch::BitsSupported(bits)) return;
-    size_t capacity = provider.ConsumeIntegralInRange<size_t>(1, 16);
+    // Log-uniform capacity in [1, 1024] (see decode.cpp).
+    size_t cap_lo = size_t{1} << provider.ConsumeIntegralInRange<int>(0, 10);
+    size_t capacity = provider.ConsumeIntegralInRange<size_t>(cap_lo, std::min<size_t>(2 * cap_lo - 1, 1024));
     const uint64_t max_elem = bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1;
 
     std::vector<Minisketch> sketches;
@@ -40,7 +42,7 @@ FUZZ_TARGET(roundtrip) {
 
     // Consume elements (duplicates allowed; pairs cancel out in the sketch).
     std::vector<uint64_t> elements;
-    while (elements.size() < 24 && provider.remaining_bytes() > 0) {
+    while (elements.size() < capacity + 8 && provider.remaining_bytes() > 0) {
         elements.push_back(provider.ConsumeIntegralInRange<uint64_t>(1, max_elem));
     }
     for (auto& sketch : sketches) {

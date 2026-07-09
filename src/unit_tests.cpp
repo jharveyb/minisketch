@@ -60,6 +60,14 @@ MINISKETCH_FIELD_TEST(generic_field_27, Field27)
 MINISKETCH_FIELD_TEST(generic_field_32, Field32)
 MINISKETCH_FIELD_TEST(generic_field_64, Field64)
 
+/* Full decode pipeline at capacity 1024 with 64-bit elements (the intended
+ * practical configuration); ~1s, by far the largest case in this suite. */
+BOOST_AUTO_TEST_CASE(generic_field_64_capacity_1024) {
+    Field64 field;
+    TestRand rng(g_test_seed + 64001);
+    ut::TestDecodeStagesLarge(field, rng, 1024);
+}
+
 /* BitWriter/BitReader roundtrip with a mix of write widths crossing byte
  * boundaries; the field Serialize/Deserialize roundtrips in the per-field
  * cases cover the remaining widths. */
