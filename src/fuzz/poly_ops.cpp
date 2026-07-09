@@ -126,10 +126,11 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
 
     // TraceMod against the naive sum of Frobenius powers.
     {
-        auto mod = ConsumeMonicPoly(provider, field, 2, MAX_DEG);
+        auto mod = ConsumeMonicPoly(provider, field, 4, MAX_DEG);
         Elem param = static_cast<Elem>(provider.ConsumeIntegralInRange<uint64_t>(1, max_elem));
         std::vector<Elem> trace;
-        TraceMod(mod, trace, param, field);
+        TraceMod<F> trace_mod(mod, field);
+        trace_mod.trace(trace, param);
         std::vector<Elem> cur{0, param};
         ut::PolyReduceRef(cur, mod, field);
         std::vector<Elem> acc = cur;
