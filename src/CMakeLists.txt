@@ -63,6 +63,25 @@ if(MINISKETCH_BUILD_TESTS)
   add_executable(test-verify test.cpp)
   target_link_libraries(test-verify PRIVATE minisketch_verify)
   add_test(NAME ${PROJECT_NAME}_test_verify COMMAND test-verify)
+
+  # Unit tests for internal algorithm stages (Boost.Test). These compile the
+  # field sources directly (not linked against libminisketch) so they can
+  # exercise the sketch_impl.h templates; they are built with MINISKETCH_VERIFY
+  # so internal CHECK_SAFE assertions fire.
+  find_package(Boost CONFIG COMPONENTS unit_test_framework)
+  if(TARGET Boost::unit_test_framework)
+    add_executable(unit-tests unit_tests.cpp unit_tests_clmul.cpp)
+    target_compile_definitions(unit-tests PRIVATE MINISKETCH_VERIFY BOOST_TEST_DYN_LINK)
+    set_target_properties(unit-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+    target_link_libraries(unit-tests PRIVATE Boost::unit_test_framework)
+    if(HAVE_CLMUL)
+      set_property(SOURCE unit_tests_clmul.cpp PROPERTY COMPILE_OPTIONS ${CLMUL_CXXFLAGS})
+      set_property(SOURCE unit_tests_clmul.cpp APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CLMUL)
+    endif()
+    add_test(NAME ${PROJECT_NAME}_unit_tests COMMAND unit-tests)
+  else()
+    message(WARNING "Boost.Test (unit_test_framework) not found; the unit-tests target will not be built.")
+  endif()
 endif()
 
 if(MINISKETCH_BUILD_BENCHMARK)
