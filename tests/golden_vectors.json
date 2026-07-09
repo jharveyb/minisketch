@@ -1,0 +1,240 @@
+[
+ {
+  "bits": 2,
+  "capacity": 1,
+  "elements": [
+   2
+  ],
+  "serialized_hex": "02"
+ },
+ {
+  "bits": 2,
+  "capacity": 2,
+  "elements": [
+   1,
+   2
+  ],
+  "serialized_hex": "03"
+ },
+ {
+  "bits": 2,
+  "capacity": 4,
+  "elements": [],
+  "serialized_hex": "00"
+ },
+ {
+  "bits": 2,
+  "capacity": 8,
+  "elements": [
+   1,
+   3
+  ],
+  "serialized_hex": "b22c"
+ },
+ {
+  "bits": 3,
+  "capacity": 1,
+  "elements": [],
+  "serialized_hex": "00"
+ },
+ {
+  "bits": 3,
+  "capacity": 2,
+  "elements": [
+   4,
+   5
+  ],
+  "serialized_hex": "19"
+ },
+ {
+  "bits": 3,
+  "capacity": 4,
+  "elements": [],
+  "serialized_hex": "0000"
+ },
+ {
+  "bits": 3,
+  "capacity": 8,
+  "elements": [
+   1,
+   2,
+   3,
+   6
+  ],
+  "serialized_hex": "4e20c6"
+ },
+ {
+  "bits": 8,
+  "capacity": 1,
+  "elements": [],
+  "serialized_hex": "00"
+ },
+ {
+  "bits": 8,
+  "capacity": 2,
+  "elements": [],
+  "serialized_hex": "0000"
+ },
+ {
+  "bits": 8,
+  "capacity": 4,
+  "elements": [
+   31,
+   66,
+   150
+  ],
+  "serialized_hex": "cb32df3f"
+ },
+ {
+  "bits": 8,
+  "capacity": 8,
+  "elements": [
+   80,
+   145,
+   154,
+   160,
+   196,
+   211
+  ],
+  "serialized_hex": "ec170dd26dfd05ab"
+ },
+ {
+  "bits": 11,
+  "capacity": 1,
+  "elements": [],
+  "serialized_hex": "0000"
+ },
+ {
+  "bits": 11,
+  "capacity": 2,
+  "elements": [
+   1316,
+   1575
+  ],
+  "serialized_hex": "03631e"
+ },
+ {
+  "bits": 11,
+  "capacity": 4,
+  "elements": [],
+  "serialized_hex": "000000000000"
+ },
+ {
+  "bits": 11,
+  "capacity": 8,
+  "elements": [
+   797
+  ],
+  "serialized_hex": "1d1b9a37ec2771e709f6a0"
+ },
+ {
+  "bits": 16,
+  "capacity": 1,
+  "elements": [
+   53856
+  ],
+  "serialized_hex": "60d2"
+ },
+ {
+  "bits": 16,
+  "capacity": 2,
+  "elements": [
+   11834,
+   37734
+  ],
+  "serialized_hex": "5cbd0da2"
+ },
+ {
+  "bits": 16,
+  "capacity": 4,
+  "elements": [
+   15964,
+   19098,
+   24898,
+   46967
+  ],
+  "serialized_hex": "f3a2e00dfe23ec42"
+ },
+ {
+  "bits": 16,
+  "capacity": 8,
+  "elements": [
+   1257,
+   3279,
+   17862,
+   30004,
+   49457,
+   58430,
+   64787
+  ],
+  "serialized_hex": "c8e029d55bfc22e3f2f476da98c6632d"
+ },
+ {
+  "bits": 32,
+  "capacity": 1,
+  "elements": [],
+  "serialized_hex": "00000000"
+ },
+ {
+  "bits": 32,
+  "capacity": 2,
+  "elements": [
+   876209144
+  ],
+  "serialized_hex": "f8e3393415c7f1e2"
+ },
+ {
+  "bits": 32,
+  "capacity": 4,
+  "elements": [
+   34494274
+  ],
+  "serialized_hex": "42570e02cfa3415e9f66c14eab703582"
+ },
+ {
+  "bits": 32,
+  "capacity": 8,
+  "elements": [],
+  "serialized_hex": "0000000000000000000000000000000000000000000000000000000000000000"
+ },
+ {
+  "bits": 64,
+  "capacity": 1,
+  "elements": [],
+  "serialized_hex": "0000000000000000"
+ },
+ {
+  "bits": 64,
+  "capacity": 2,
+  "elements": [
+   6232832097835246727,
+   6790778162878701223
+  ],
+  "serialized_hex": "203ac2b207c742088a1ce3bdb18a6aa7"
+ },
+ {
+  "bits": 64,
+  "capacity": 4,
+  "elements": [
+   4149655823320236875,
+   9344421695442453967,
+   13600746181392431187
+  ],
+  "serialized_hex": "d73e4a336e09870487862c9fb93009726c5e891448dfdac6c6f5998a116bca52"
+ },
+ {
+  "bits": 64,
+  "capacity": 8,
+  "elements": [
+   1073892684874442211,
+   3564563940764872595,
+   7759104081498736782,
+   11166360155194816610,
+   12346774032542627136,
+   15524082577519477263,
+   15829369155827348149,
+   16724752985191108517
+  ],
+  "serialized_hex": "c3706e1bcabc5481d6bcc24e30784c0e995d0fa6820883b30e783f31f24fefa977b483b49108b7f4d7680a1e3f1f9b6d6bb06406a3d57e800fb90ba83883400f"
+ }
+]
