@@ -30,6 +30,10 @@ if [ ! -x "$BUILD_DIR/bin/fuzz" ]; then
     exit 1
 fi
 
+replay_cov() { # replay_cov <target> <dir>: edge coverage of replaying a corpus
+    FUZZ="$1" "$BUILD_DIR/bin/fuzz" -runs=0 "$2" 2>&1 | grep -o 'cov: [0-9]*' | tail -1 | cut -d' ' -f2
+}
+
 for target in $TARGETS; do
     work="$BUILD_DIR/corpus/$target"
     seeds="src/fuzz/corpus/$target"
@@ -38,23 +42,32 @@ for target in $TARGETS; do
         continue
     fi
     tmp=$(mktemp -d)
+    candidate=$(mktemp -d)
     FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 "$tmp" "$seeds" "$work" > /dev/null 2>&1
     files=($(ls -S "$tmp")); n=${#files[@]}
     if [ "$n" -lt $(( 3 * PER_STRATUM )) ]; then
-        echo "$target: minimized corpus has only $n files; keeping all of them"
-        rm -f "$seeds"/*
-        cp "$tmp"/* "$seeds/"
+        cp "$tmp"/* "$candidate/"
     else
-        rm -f "$seeds"/*
         for (( i = 0; i < PER_STRATUM; ++i )); do
-            cp "$tmp/${files[$i]}" "$seeds/"                       # largest
-            cp "$tmp/${files[$(( n / 2 - PER_STRATUM / 2 + i ))]}" "$seeds/"  # median
-            cp "$tmp/${files[$(( n - 1 - i ))]}" "$seeds/"         # smallest
+            cp "$tmp/${files[$i]}" "$candidate/"                       # largest
+            cp "$tmp/${files[$(( n / 2 - PER_STRATUM / 2 + i ))]}" "$candidate/"  # median
+            cp "$tmp/${files[$(( n - 1 - i ))]}" "$candidate/"         # smallest
         done
     fi
-    rm -rf "$tmp"
-    replay=$(FUZZ="$target" "$BUILD_DIR/bin/fuzz" -runs=0 "$seeds" 2>&1 | grep -o 'cov: [0-9]*' | tail -1)
-    echo "$target: minimized $n -> $(ls "$seeds" | wc -l) seeds, replay $replay"
+    # Coverage guard: never replace the committed seeds with a worse set
+    # (e.g. when the working corpus comes from a short session). Compared on
+    # the same binary, so the numbers are meaningful.
+    old_cov=$(replay_cov "$target" "$seeds"); old_cov=${old_cov:-0}
+    new_cov=$(replay_cov "$target" "$candidate"); new_cov=${new_cov:-0}
+    if [ "$new_cov" -lt "$old_cov" ]; then
+        echo "$target: candidate seeds replay cov $new_cov < committed $old_cov; keeping committed set" \
+             "(fuzz longer, or raise SEEDS_PER_TARGET)"
+    else
+        rm -f "$seeds"/*
+        cp "$candidate"/* "$seeds/"
+        echo "$target: minimized $n -> $(ls "$seeds" | wc -l) seeds, replay cov $old_cov -> $new_cov"
+    fi
+    rm -rf "$tmp" "$candidate"
 done
 echo
 echo "Review with 'git status' and commit the updated src/fuzz/corpus/."
