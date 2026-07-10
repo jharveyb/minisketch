@@ -165,10 +165,12 @@ There are two corpora per target with different lifecycles:
   tools/update_seed_corpus.sh   # minimize + resample, then review and commit
   ```
 
-  Run that after a substantial fuzzing session (a thin working corpus makes
-  worse seeds than the committed ones), and always after changing a target's
-  input layout (adding/removing `Consume*` calls) — stale seeds still run
-  but no longer decode to the cases they were selected for.
+  Run that after a substantial fuzzing session, and always after changing a
+  target's input layout (adding/removing `Consume*` calls) — stale seeds
+  still run but no longer decode to the cases they were selected for. The
+  script refuses to replace a target's seeds when the candidate set replays
+  less coverage than the committed one (as happens with a thin working
+  corpus), so running it too early is harmless.
 
 libFuzzer also writes informational `slow-unit-*` artifacts (inputs taking
 more than ~10s; expected for adversarial capacity-1024 decodes) to
