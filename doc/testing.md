@@ -148,8 +148,34 @@ core (2026-07): decode cov≈28500, roundtrip cov≈29200, poly_ops cov≈1000
 (the poly_ops target only instantiates two generic fields, hence the smaller
 denominator), no failures across ~500k executions.
 
-A small seed corpus is committed under `src/fuzz/corpus/<target>/` so short CI
-runs start from meaningful inputs; long local runs grow the working corpus.
+### Corpus management
+
+There are two corpora per target with different lifecycles:
+
+- **Working corpus** (`build-fuzz/corpus/<target>/`): libFuzzer writes every
+  coverage-increasing input here *as it finds it*, so it grows during any
+  fuzzing session and persists across runs (including interrupted ones). It
+  accumulates unminimized; delete it freely to start over.
+- **Committed seed corpus** (`src/fuzz/corpus/<target>/`): a small
+  (~24-file), size-stratified sample of a coverage-minimized corpus, so
+  short CI/smoke runs start from meaningful inputs. It is *not* updated
+  automatically. Refresh it with:
+
+  ```sh
+  tools/update_seed_corpus.sh   # minimize + resample, then review and commit
+  ```
+
+  Run that after a substantial fuzzing session (a thin working corpus makes
+  worse seeds than the committed ones), and always after changing a target's
+  input layout (adding/removing `Consume*` calls) — stale seeds still run
+  but no longer decode to the cases they were selected for.
+
+libFuzzer also writes informational `slow-unit-*` artifacts (inputs taking
+more than ~10s; expected for adversarial capacity-1024 decodes) to
+`build-fuzz/artifacts/<target>/`. They are not failures and are safe to
+delete — but they make good worst-case reproducers: replay one with
+`FUZZ=<target> ./build-fuzz/bin/fuzz <artifact-file>`, e.g. to benchmark a
+decode-stage optimization against a known-bad input.
 
 ### Test power (mutation spot-checks)
 
