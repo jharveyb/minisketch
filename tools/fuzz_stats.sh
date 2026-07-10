@@ -7,9 +7,20 @@
 # seeded from the committed corpus in src/fuzz/corpus/. Reports libFuzzer's
 # edge-coverage (cov:), feature (ft:) and corpus-size counters per target.
 #
+# Parallelism: set FORK to a worker count (e.g. FORK=$(nproc)) to fuzz each
+# target with libFuzzer's fork mode, spreading mutation across cores. Note
+# the seconds-per-target budget bounds only the *fuzzing* phase, not the
+# initial replay of the working corpus: once a target's corpus grows to many
+# thousands of inputs (especially the slow high-capacity decode/roundtrip
+# ones), that startup replay dominates wall time and the time budget has
+# little visible effect. Fork mode parallelizes fuzzing but the startup still
+# processes the whole corpus, so it helps long sessions more than quick snaps.
+#
 # Environment:
 #   FUZZ_TARGETS  space-separated targets to run (default: all)
 #   FUZZ_ARGS     extra libFuzzer arguments (e.g. -max_len=1024)
+#   FUZZ_MAX_LEN  max input length (default 4096)
+#   FORK          worker count for libFuzzer fork mode (default: unset = 1 process)
 
 set -euo pipefail
 
@@ -17,6 +28,14 @@ cd "$(dirname "$0")/.."
 SECONDS_PER_TARGET="${1:-60}"
 BUILD_DIR="${2:-build-fuzz}"
 TARGETS="${FUZZ_TARGETS:-decode roundtrip poly_ops reconcile}"
+
+# Fork-mode flags: ignore timeouts/OOMs (slow high-capacity inputs are
+# expected, not bugs) but NOT crashes, so a real FUZZ_CHECK failure still
+# stops the run and is reported below.
+FORK_ARGS=()
+if [ -n "${FORK:-}" ]; then
+    FORK_ARGS=(-fork="$FORK" -ignore_timeouts=1 -ignore_ooms=1)
+fi
 
 if [ ! -x "$BUILD_DIR/bin/fuzz" ]; then
     echo "error: $BUILD_DIR/bin/fuzz not found." >&2
@@ -37,7 +56,7 @@ for target in $TARGETS; do
     FUZZ="$target" "$BUILD_DIR/bin/fuzz" \
         -max_total_time="$SECONDS_PER_TARGET" -max_len="${FUZZ_MAX_LEN:-4096}" -print_final_stats=1 \
         -artifact_prefix="$artifacts/" \
-        ${FUZZ_ARGS:-} "$workdir" > "$log" 2>&1 || rc=$?
+        "${FORK_ARGS[@]}" ${FUZZ_ARGS:-} "$workdir" > "$log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
         if grep -q "run interrupted" "$log"; then
             echo "Interrupted during target $target (no failure); see $log" >&2
@@ -46,9 +65,13 @@ for target in $TARGETS; do
         fi
         exit "$rc"
     fi
-    cov=$(grep -o 'cov: [0-9]*' "$log" | tail -1 | cut -d' ' -f2)
-    ft=$(grep -o 'ft: [0-9]*' "$log" | tail -1 | cut -d' ' -f2)
-    execs=$(grep -o 'stat::number_of_executed_units: *[0-9]*' "$log" | grep -o '[0-9]*$')
+    # Tolerate missing matches (|| true): under `set -e` an empty grep would
+    # otherwise abort the script. Fork mode does not emit the -print_final_stats
+    # line, so fall back to the last iteration counter (#N:) for execs.
+    cov=$(grep -o 'cov: [0-9]*' "$log" | tail -1 | cut -d' ' -f2 || true)
+    ft=$(grep -o 'ft: [0-9]*' "$log" | tail -1 | cut -d' ' -f2 || true)
+    execs=$(grep -o 'stat::number_of_executed_units: *[0-9]*' "$log" | grep -o '[0-9]*$' | tail -1 || true)
+    [ -n "$execs" ] || execs=$(grep -oE '^#[0-9]+' "$log" | tr -d '#' | tail -1 || true)
     printf '%-12s %10s %10s %10s %12s\n' "$target" "${cov:-?}" "${ft:-?}" "$(ls "$workdir" | wc -l)" "${execs:-?}"
 done
 echo
