@@ -195,13 +195,15 @@ merges, coverage replays, or CI. In particular, do not move them into
 FUZZ=decode ./build-fuzz/bin/fuzz src/fuzz/slow-units/decode/<file>
 ```
 
-Current inventory (decode replay wall-times, measured 2026-07-10):
+Current inventory (decode replay wall-times in the sanitized fuzz build,
+measured 2026-07-10; all three are adversarial capacity-~1024 decodes, the
+expected worst-case family):
 
-| file                   | size | decode replay |
-| ---------------------- | ---- | ------------- |
-| `slow-unit-0865be…39b` | 13 B | ~20 s         |
-| `slow-unit-bf232e…943` | 11 B | ~10 s         |
-| `slow-unit-d2f8ac…b59` | 11 B | ~50 min       |
+| file                   | size | decode replay | parameters                  |
+| ---------------------- | ---- | ------------- | --------------------------- |
+| `slow-unit-0865be…39b` | 13 B | ~20 s         | bits=54, capacity=1021      |
+| `slow-unit-bf232e…943` | 11 B | ~10 s         | bits=56, capacity=1024      |
+| `slow-unit-d2f8ac…b59` | 11 B | ~12 s         | bits=62, capacity=1024, exercises the `SetSeed(-1)` fixed-basis path (~10x slower root-finding than a hashed basis on this input) |
 
 ### Test power (mutation spot-checks)
 
