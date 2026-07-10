@@ -19,6 +19,11 @@
 # Environment:
 #   FUZZ_TARGETS  space-separated targets (default: all)
 #   RESET         1 = replace instead of append (guarded)
+#
+# Merges can take many minutes (every seed and working-corpus input is
+# replayed once). Progress is observable via the per-target control file
+# printed at the start of each merge; an interrupted merge resumes from
+# that file on the next run.
 
 set -euo pipefail
 
@@ -44,11 +49,17 @@ for target in $TARGETS; do
     fi
     mkdir -p "$seeds"
     old_count=$(ls "$seeds" | wc -l)
+    work_count=$(ls "$work" | wc -l)
     old_cov=$(replay_cov "$target" "$seeds"); old_cov=${old_cov:-0}
+
+    ctl="$BUILD_DIR/merge-$target.control"
+    [ -f "$ctl" ] && echo "$target: resuming interrupted merge from $ctl"
 
     if [ "${RESET:-0}" = "1" ]; then
         candidate=$(mktemp -d)
-        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 "$candidate" "$work" > /dev/null 2>&1
+        echo "$target: RESET-merging $work_count inputs; watch progress with: grep -c ^STARTED $ctl"
+        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 -merge_control_file="$ctl" "$candidate" "$work" > /dev/null 2>&1
+        rm -f "$ctl"
         new_cov=$(replay_cov "$target" "$candidate"); new_cov=${new_cov:-0}
         if [ "$new_cov" -lt "$old_cov" ]; then
             echo "$target: RESET candidate replays cov $new_cov < committed $old_cov; keeping committed set (fuzz longer first)"
@@ -59,7 +70,9 @@ for target in $TARGETS; do
         fi
         rm -rf "$candidate"
     else
-        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 "$seeds" "$work" > /dev/null 2>&1
+        echo "$target: merging $((old_count + work_count)) inputs; watch progress with: grep -c ^STARTED $ctl"
+        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 -merge_control_file="$ctl" "$seeds" "$work" > /dev/null 2>&1
+        rm -f "$ctl"
         new_cov=$(replay_cov "$target" "$seeds"); new_cov=${new_cov:-0}
         echo "$target: $old_count -> $(ls "$seeds" | wc -l) seeds (+$(( $(ls "$seeds" | wc -l) - old_count ))), replay cov $old_cov -> $new_cov"
     fi
