@@ -37,7 +37,8 @@ if [ ! -x "$BUILD_DIR/bin/fuzz" ]; then
 fi
 
 replay_cov() { # replay_cov <target> <dir>: edge coverage of replaying a corpus
-    FUZZ="$1" "$BUILD_DIR/bin/fuzz" -runs=0 "$2" 2>&1 | grep -o 'cov: [0-9]*' | tail -1 | cut -d' ' -f2
+    mkdir -p "$BUILD_DIR/artifacts/$1"
+    FUZZ="$1" "$BUILD_DIR/bin/fuzz" -runs=0 -artifact_prefix="$BUILD_DIR/artifacts/$1/" "$2" 2>&1 | grep -o 'cov: [0-9]*' | tail -1 | cut -d' ' -f2
 }
 
 for target in $TARGETS; do
@@ -53,12 +54,14 @@ for target in $TARGETS; do
     old_cov=$(replay_cov "$target" "$seeds"); old_cov=${old_cov:-0}
 
     ctl="$BUILD_DIR/merge-$target.control"
+    artifacts="$BUILD_DIR/artifacts/$target"
+    mkdir -p "$artifacts"
     [ -f "$ctl" ] && echo "$target: resuming interrupted merge from $ctl"
 
     if [ "${RESET:-0}" = "1" ]; then
         candidate=$(mktemp -d)
         echo "$target: RESET-merging $work_count inputs; watch progress with: grep -c ^STARTED $ctl"
-        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 -merge_control_file="$ctl" "$candidate" "$work" > /dev/null 2>&1
+        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 -merge_control_file="$ctl" -artifact_prefix="$artifacts/" "$candidate" "$work" > /dev/null 2>&1
         rm -f "$ctl"
         new_cov=$(replay_cov "$target" "$candidate"); new_cov=${new_cov:-0}
         if [ "$new_cov" -lt "$old_cov" ]; then
@@ -71,7 +74,7 @@ for target in $TARGETS; do
         rm -rf "$candidate"
     else
         echo "$target: merging $((old_count + work_count)) inputs; watch progress with: grep -c ^STARTED $ctl"
-        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 -merge_control_file="$ctl" "$seeds" "$work" > /dev/null 2>&1
+        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 -merge_control_file="$ctl" -artifact_prefix="$artifacts/" "$seeds" "$work" > /dev/null 2>&1
         rm -f "$ctl"
         new_cov=$(replay_cov "$target" "$seeds"); new_cov=${new_cov:-0}
         echo "$target: $old_count -> $(ls "$seeds" | wc -l) seeds (+$(( $(ls "$seeds" | wc -l) - old_count ))), replay cov $old_cov -> $new_cov"
