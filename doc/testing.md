@@ -181,9 +181,27 @@ There are two corpora per target with different lifecycles:
 libFuzzer also writes informational `slow-unit-*` artifacts (inputs taking
 more than ~10s; expected for adversarial capacity-1024 decodes) to
 `build-fuzz/artifacts/<target>/`. They are not failures and are safe to
-delete — but they make good worst-case reproducers: replay one with
-`FUZZ=<target> ./build-fuzz/bin/fuzz <artifact-file>`, e.g. to benchmark a
+delete — but they make good worst-case reproducers, e.g. to benchmark a
 decode-stage optimization against a known-bad input.
+
+Reproducers worth keeping are committed under
+`src/fuzz/slow-units/<target>/`. Nothing replays that directory
+automatically, deliberately so: unlike seed-corpus files, each of these
+costs seconds to *minutes*, so they must never be picked up by corpus
+merges, coverage replays, or CI. In particular, do not move them into
+`src/fuzz/corpus/`. Replay one explicitly with:
+
+```sh
+FUZZ=decode ./build-fuzz/bin/fuzz src/fuzz/slow-units/decode/<file>
+```
+
+Current inventory (decode replay wall-times, measured 2026-07-10):
+
+| file                   | size | decode replay |
+| ---------------------- | ---- | ------------- |
+| `slow-unit-0865be…39b` | 13 B | ~20 s         |
+| `slow-unit-bf232e…943` | 11 B | ~10 s         |
+| `slow-unit-d2f8ac…b59` | 11 B | ~50 min       |
 
 ### Test power (mutation spot-checks)
 
