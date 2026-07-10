@@ -48,7 +48,7 @@ cmake -B "$BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_CXX_FLAGS="-fprofile-instr-generate -fcoverage-mapping" \
     -DCMAKE_EXE_LINKER_FLAGS="-fprofile-instr-generate"
-cmake --build "$BUILD_DIR" -j "$(nproc)"
+cmake --build "$BUILD_DIR" -j "$(( $(nproc) - 4 ))"
 
 PROFILE_DIR="$PWD/$BUILD_DIR/profiles"
 rm -rf "$PROFILE_DIR"
