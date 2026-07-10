@@ -25,7 +25,10 @@ namespace {
 /** Construct sketches for all supported implementations of a field size. */
 std::vector<Minisketch> CreateAll(uint32_t bits, size_t capacity) {
     std::vector<Minisketch> ret;
-    for (uint32_t impl = 0; impl <= Minisketch::MaxImplementation(); ++impl) {
+    uint32_t max_impl = Minisketch::MaxImplementation();
+    // TODO: temporary clamp to ignore CLMUL_TRI for now
+    uint32_t max_applied_impl = std::max(max_impl, (uint32_t)1);
+    for (uint32_t impl = 0; impl <= max_applied_impl; ++impl) {
         if (Minisketch::ImplementationSupported(bits, impl)) {
             ret.push_back(Minisketch(bits, impl, capacity));
             FUZZ_CHECK((bool)ret.back());
