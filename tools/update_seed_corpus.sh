@@ -1,29 +1,30 @@
 #!/usr/bin/env bash
-# Refresh the committed seed corpus (src/fuzz/corpus/<target>/) from the
+# Update the committed seed corpus (src/fuzz/corpus/<target>/) from the
 # working corpora that fuzzing sessions grow under <build-dir>/corpus/.
 #
 # Usage: tools/update_seed_corpus.sh [build-dir]
 #
-# For each target: minimize (committed seeds + working corpus) with
-# libFuzzer's -merge=1 to the subset preserving all observed coverage, then
-# commit a small size-stratified sample of it (smallest / median / largest
-# files) as the new seeds. Review and git add the result.
+# Default (additive): libFuzzer's -merge=1 into the seed directory keeps all
+# existing seeds and appends only those working-corpus inputs that add
+# coverage features the seeds don't already have. This is monotone (committed
+# coverage never decreases) and self-deduplicating; the set grows only while
+# a target still has undiscovered features.
 #
-# Run this after long fuzzing sessions, and always after changing a target's
-# input layout (added/removed Consume* calls) — old seeds still run but no
-# longer mean what they did.
+# RESET=1: rebuild a target's seed set from scratch (minimize the working
+# corpus alone and replace). Use after changing a target's input layout
+# (added/removed Consume* calls), when old seeds no longer decode to the
+# cases they were selected for. A coverage guard refuses a reset that would
+# replay less coverage than the committed set.
 #
 # Environment:
-#   FUZZ_TARGETS      space-separated targets (default: all)
-#   SEEDS_PER_TARGET  committed seeds per target (default: 24, rounded down
-#                     to a multiple of 3)
+#   FUZZ_TARGETS  space-separated targets (default: all)
+#   RESET         1 = replace instead of append (guarded)
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 BUILD_DIR="${1:-build-fuzz}"
 TARGETS="${FUZZ_TARGETS:-decode roundtrip poly_ops reconcile}"
-PER_STRATUM=$(( ${SEEDS_PER_TARGET:-24} / 3 ))
 
 if [ ! -x "$BUILD_DIR/bin/fuzz" ]; then
     echo "error: $BUILD_DIR/bin/fuzz not found." >&2
@@ -41,33 +42,27 @@ for target in $TARGETS; do
         echo "$target: no working corpus in $work; skipping (run tools/fuzz_stats.sh first)"
         continue
     fi
-    tmp=$(mktemp -d)
-    candidate=$(mktemp -d)
-    FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 "$tmp" "$seeds" "$work" > /dev/null 2>&1
-    files=($(ls -S "$tmp")); n=${#files[@]}
-    if [ "$n" -lt $(( 3 * PER_STRATUM )) ]; then
-        cp "$tmp"/* "$candidate/"
-    else
-        for (( i = 0; i < PER_STRATUM; ++i )); do
-            cp "$tmp/${files[$i]}" "$candidate/"                       # largest
-            cp "$tmp/${files[$(( n / 2 - PER_STRATUM / 2 + i ))]}" "$candidate/"  # median
-            cp "$tmp/${files[$(( n - 1 - i ))]}" "$candidate/"         # smallest
-        done
-    fi
-    # Coverage guard: never replace the committed seeds with a worse set
-    # (e.g. when the working corpus comes from a short session). Compared on
-    # the same binary, so the numbers are meaningful.
+    mkdir -p "$seeds"
+    old_count=$(ls "$seeds" | wc -l)
     old_cov=$(replay_cov "$target" "$seeds"); old_cov=${old_cov:-0}
-    new_cov=$(replay_cov "$target" "$candidate"); new_cov=${new_cov:-0}
-    if [ "$new_cov" -lt "$old_cov" ]; then
-        echo "$target: candidate seeds replay cov $new_cov < committed $old_cov; keeping committed set" \
-             "(fuzz longer, or raise SEEDS_PER_TARGET)"
+
+    if [ "${RESET:-0}" = "1" ]; then
+        candidate=$(mktemp -d)
+        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 "$candidate" "$work" > /dev/null 2>&1
+        new_cov=$(replay_cov "$target" "$candidate"); new_cov=${new_cov:-0}
+        if [ "$new_cov" -lt "$old_cov" ]; then
+            echo "$target: RESET candidate replays cov $new_cov < committed $old_cov; keeping committed set (fuzz longer first)"
+        else
+            rm -f "$seeds"/*
+            cp "$candidate"/* "$seeds/"
+            echo "$target: RESET $old_count -> $(ls "$seeds" | wc -l) seeds, replay cov $old_cov -> $new_cov"
+        fi
+        rm -rf "$candidate"
     else
-        rm -f "$seeds"/*
-        cp "$candidate"/* "$seeds/"
-        echo "$target: minimized $n -> $(ls "$seeds" | wc -l) seeds, replay cov $old_cov -> $new_cov"
+        FUZZ="$target" "$BUILD_DIR/bin/fuzz" -merge=1 "$seeds" "$work" > /dev/null 2>&1
+        new_cov=$(replay_cov "$target" "$seeds"); new_cov=${new_cov:-0}
+        echo "$target: $old_count -> $(ls "$seeds" | wc -l) seeds (+$(( $(ls "$seeds" | wc -l) - old_count ))), replay cov $old_cov -> $new_cov"
     fi
-    rm -rf "$tmp" "$candidate"
 done
 echo
 echo "Review with 'git status' and commit the updated src/fuzz/corpus/."

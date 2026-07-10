@@ -156,21 +156,27 @@ There are two corpora per target with different lifecycles:
   coverage-increasing input here *as it finds it*, so it grows during any
   fuzzing session and persists across runs (including interrupted ones). It
   accumulates unminimized; delete it freely to start over.
-- **Committed seed corpus** (`src/fuzz/corpus/<target>/`): a small
-  (~24-file), size-stratified sample of a coverage-minimized corpus, so
-  short CI/smoke runs start from meaningful inputs. It is *not* updated
-  automatically. Refresh it with:
+- **Committed seed corpus** (`src/fuzz/corpus/<target>/`): a
+  coverage-minimized seed set (a few hundred to a few thousand byte-sized
+  files per target, ~150KB of content in total), so CI/smoke runs and fresh
+  checkouts start from meaningful inputs. It is *not* updated automatically.
+  Update it with:
 
   ```sh
-  tools/update_seed_corpus.sh   # minimize + resample, then review and commit
+  tools/update_seed_corpus.sh   # additive; then review and commit
   ```
 
-  Run that after a substantial fuzzing session, and always after changing a
-  target's input layout (adding/removing `Consume*` calls) — stale seeds
-  still run but no longer decode to the cases they were selected for. The
-  script refuses to replace a target's seeds when the candidate set replays
-  less coverage than the committed one (as happens with a thin working
-  corpus), so running it too early is harmless.
+  This is additive and monotone: libFuzzer's `-merge=1` keeps all existing
+  seeds and appends only working-corpus inputs that add coverage features
+  the seeds lack, so committed coverage never decreases and running the
+  script after a too-short session is harmless. The set grows only while a
+  target still has undiscovered features.
+
+  After changing a target's input layout (adding/removing `Consume*`
+  calls), old seeds still run but no longer decode to the cases they were
+  selected for; rebuild that target's set from scratch with
+  `RESET=1 FUZZ_TARGETS=<target> tools/update_seed_corpus.sh` (guarded: a
+  reset that would replay less coverage than the committed set is refused).
 
 libFuzzer also writes informational `slow-unit-*` artifacts (inputs taking
 more than ~10s; expected for adversarial capacity-1024 decodes) to
