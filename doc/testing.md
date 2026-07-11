@@ -188,11 +188,19 @@ There are two corpora per target with different lifecycles:
   2026-07 decode corpus, the slow tier is ~32% of the inputs and ~94% of the
   replay time but adds only ~0.2% edge coverage (it does add ~4% more
   *features* — the deep-recursion hit-count buckets that matter when
-  optimizing root finding). `tools/fuzz_stats.sh` and manual runs load only
-  the fast tier by default; pass `SLOW=1` (or the `corpus-slow/` dir
-  explicitly) to include the slow tier. `update_seed_corpus.sh` keeps both
-  tiers correct automatically: it merges over their union (so coverage is
-  never lost) and re-partitions by capacity using `build-fuzz/bin/corpus-tier`.
+  optimizing root finding).
+
+  The tiering applies to *both* corpora. `tools/fuzz_stats.sh` loads only the
+  fast tier by default (so startup stays ~35s); before each run it also moves
+  any high-capacity inputs out of the working corpus into
+  `build-fuzz/corpus-slow/<target>/`, so the load stays fast even as fuzzing
+  discovers deep-capacity inputs. Pass `SLOW=1` to load the slow tier as well.
+  `update_seed_corpus.sh` keeps the committed tiers correct: a full run merges
+  both working tiers over the union of both committed tiers and re-partitions
+  by capacity (via `build-fuzz/bin/corpus-tier`), so coverage is never lost;
+  `FAST=1` merges only the fast working corpus into the committed fast tier and
+  skips the slow tier entirely, trading completeness for speed (~2 min vs
+  ~10 min for decode). See the example campaigns below.
 
 libFuzzer also writes informational `slow-unit-*` artifacts (inputs taking
 more than ~10s; expected for adversarial capacity-1024 decodes) to
@@ -220,6 +228,48 @@ expected worst-case family):
 | `slow-unit-0865be…39b` | 13 B | ~20 s         | bits=54, capacity=1021      |
 | `slow-unit-bf232e…943` | 11 B | ~10 s         | bits=56, capacity=1024      |
 | `slow-unit-d2f8ac…b59` | 11 B | ~12 s         | bits=62, capacity=1024, exercises the `SetSeed(-1)` fixed-basis path (~10x slower root-finding than a hashed basis on this input) |
+
+### Example campaigns
+
+**Fast-only campaign** — repeated short interactive passes, then promote just
+the low-capacity coverage. Each `fuzz_stats.sh` run loads only the fast tier,
+so startup stays ~35s and the whole time budget is spent fuzzing:
+
+```sh
+FUZZ_TARGETS=decode tools/fuzz_stats.sh 120   # ~35s load + 120s fuzz
+FUZZ_TARGETS=decode tools/fuzz_stats.sh 120   # repeat as often as you like;
+FUZZ_TARGETS=decode tools/fuzz_stats.sh 120   # the working corpus persists
+
+FAST=1 FUZZ_TARGETS=decode tools/update_seed_corpus.sh   # ~2 min, fast tier only
+git add src/fuzz/corpus/decode
+git commit -m "fuzz: grow decode fast seed tier"
+```
+
+`FAST=1` merges only the fast working corpus into the committed fast tier and
+never replays the slow tier. Any high-capacity inputs the runs discovered
+accumulate in `build-fuzz/corpus-slow/decode/` and are *not* promoted here (the
+run reports how many were left behind); they wait for a full update. So the
+only committed change is `src/fuzz/corpus/`.
+
+**Mixed campaign** — fast passes for broad coverage plus occasional slow passes
+that also exercise the high-capacity tier, then a full update that folds in
+both:
+
+```sh
+FUZZ_TARGETS=decode tools/fuzz_stats.sh 120            # fast passes
+SLOW=1 FUZZ_TARGETS=decode tools/fuzz_stats.sh 300     # slow pass: loads
+                                                        # corpus-slow too, so
+                                                        # startup is minutes
+
+tools/update_seed_corpus.sh                            # full: ~10 min for decode
+git add src/fuzz/corpus/decode src/fuzz/corpus-slow/decode
+git commit -m "fuzz: grow decode seed corpus (both tiers)"
+```
+
+A full update (no `FAST`) merges both working tiers over both committed tiers
+and re-partitions by capacity, so new worst-case inputs land in
+`src/fuzz/corpus-slow/` — hence both directories are committed. Run this
+occasionally to fold in the high-capacity finds that fast-only updates skip.
 
 ### Test power (mutation spot-checks)
 
