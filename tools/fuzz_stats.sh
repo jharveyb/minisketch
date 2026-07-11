@@ -21,6 +21,8 @@
 #   FUZZ_ARGS     extra libFuzzer arguments (e.g. -max_len=1024)
 #   FUZZ_MAX_LEN  max input length (default 4096)
 #   FORK          worker count for libFuzzer fork mode (default: unset = 1 process)
+#   SLOW          1 = also load the high-capacity slow corpus tier
+#                 (src/fuzz/corpus-slow/); default loads only the fast tier
 
 set -euo pipefail
 
@@ -48,9 +50,17 @@ for target in $TARGETS; do
     workdir="$BUILD_DIR/corpus/$target"
     artifacts="$BUILD_DIR/artifacts/$target"
     mkdir -p "$workdir" "$artifacts"
-    if [ -d "src/fuzz/corpus/$target" ]; then
-        cp -n src/fuzz/corpus/"$target"/* "$workdir/" 2> /dev/null || true
-    fi
+    # Seed the working corpus from the committed fast tier. The slow tier
+    # (high-capacity decode/roundtrip inputs) is loaded only when SLOW=1: it
+    # is ~a third of the corpus but dominates startup replay while adding a
+    # fraction of a percent of edge coverage, so skipping it keeps snapshot
+    # runs interactive. See tools/update_seed_corpus.sh and doc/testing.md.
+    for src in "src/fuzz/corpus/$target" \
+               ${SLOW:+"src/fuzz/corpus-slow/$target"}; do
+        if [ -d "$src" ]; then
+            cp -n "$src"/* "$workdir/" 2> /dev/null || true
+        fi
+    done
     log="$BUILD_DIR/fuzz-$target.log"
     rc=0
     FUZZ="$target" "$BUILD_DIR/bin/fuzz" \

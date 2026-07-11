@@ -158,9 +158,8 @@ There are two corpora per target with different lifecycles:
   accumulates unminimized; delete it freely to start over.
 - **Committed seed corpus** (`src/fuzz/corpus/<target>/`): a
   coverage-minimized seed set (a few hundred to a few thousand byte-sized
-  files per target, ~150KB of content in total), so CI/smoke runs and fresh
-  checkouts start from meaningful inputs. It is *not* updated automatically.
-  Update it with:
+  files per target), so fresh checkouts start from meaningful inputs. It is
+  *not* updated automatically. Update it with:
 
   ```sh
   tools/update_seed_corpus.sh   # additive; then review and commit
@@ -177,6 +176,23 @@ There are two corpora per target with different lifecycles:
   selected for; rebuild that target's set from scratch with
   `RESET=1 FUZZ_TARGETS=<target> tools/update_seed_corpus.sh` (guarded: a
   reset that would replay less coverage than the committed set is refused).
+
+- **Slow corpus tier** (`src/fuzz/corpus-slow/<target>/`, decode and
+  roundtrip only): decode cost is quadratic in the `capacity` parameter, so
+  high-capacity inputs cost seconds each and dominate startup replay — the
+  full decode corpus takes ~10 minutes to replay once, versus ~35s for the
+  low-capacity majority. The committed corpus is therefore split at capacity
+  128 (the same worst-case boundary `decode.cpp` uses to prune
+  implementations): inputs with capacity ≤ 128 stay in `corpus/` (the fast
+  tier, always loaded) and those above go to `corpus-slow/`. Measured on the
+  2026-07 decode corpus, the slow tier is ~32% of the inputs and ~94% of the
+  replay time but adds only ~0.2% edge coverage (it does add ~4% more
+  *features* — the deep-recursion hit-count buckets that matter when
+  optimizing root finding). `tools/fuzz_stats.sh` and manual runs load only
+  the fast tier by default; pass `SLOW=1` (or the `corpus-slow/` dir
+  explicitly) to include the slow tier. `update_seed_corpus.sh` keeps both
+  tiers correct automatically: it merges over their union (so coverage is
+  never lost) and re-partitions by capacity using `build-fuzz/bin/corpus-tier`.
 
 libFuzzer also writes informational `slow-unit-*` artifacts (inputs taking
 more than ~10s; expected for adversarial capacity-1024 decodes) to
