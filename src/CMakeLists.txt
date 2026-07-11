@@ -122,6 +122,12 @@ if(MINISKETCH_BUILD_FUZZ)
   target_link_libraries(fuzz PRIVATE minisketch_verify)
   target_link_options(fuzz PRIVATE -fsanitize=fuzzer)
 
+  # Corpus-tiering helper (plain executable, no libFuzzer main): reports the
+  # capacity each corpus file decodes to so tools/update_seed_corpus.sh can
+  # split decode/roundtrip corpora into fast and slow tiers by decode cost.
+  add_executable(corpus-tier fuzz/corpus_tier.cpp)
+  set_target_properties(corpus-tier PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+
   # Smoke tests: a short bounded run of each target so plain `ctest` exercises
   # them (real fuzzing sessions run the binary directly with a corpus dir).
   foreach(fuzz_target decode roundtrip poly_ops reconcile)
