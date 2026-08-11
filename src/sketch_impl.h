@@ -7,6 +7,7 @@
 #ifndef _MINISKETCH_SKETCH_IMPL_H_
 #define _MINISKETCH_SKETCH_IMPL_H_
 
+#include <deque>
 #include <random>
 
 #include "util.h"
@@ -120,16 +121,35 @@ void PolyMulLowNaive(const std::vector<typename F::Elem>& a, const std::vector<t
     }
 }
 
+/** Reusable scratch buffers for the TraceMod polynomial multiplications below.
+ * Slot (level, idx) is dedicated to one temporary of one recursion level, so a
+ * callee never touches its caller's buffers, and buffer capacity persists
+ * across calls. A deque keeps references to existing slots valid while deeper
+ * recursion levels append new ones. */
 template<typename F>
-void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, const F& field);
+struct TraceModScratch {
+    static const size_t SLOTS = 9;
+    std::deque<std::vector<typename F::Elem>> slots;
+    std::vector<typename F::Elem>& Get(size_t level, size_t idx) {
+        CHECK_SAFE(idx < SLOTS);
+        size_t i = level * SLOTS + idx;
+        while (i >= slots.size()) slots.emplace_back();
+        return slots[i];
+    }
+};
+
+template<typename F>
+void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, const F& field, TraceModScratch<F>& scratch, size_t level);
 
 /** Compute a*b mod x^n: the low n coefficients of the product in F[x].
  * Uses Karatsuba with the characteristic-2 identity
  * (a0+a1)*(b0+b1) + a0*b0 + a1*b1 for the middle term.
- * The temporary vector implementation has peak live polynomial storage bounded
+ * Temporaries live in scratch slots of the given recursion level, so repeated
+ * calls with the same scratch are allocation-free in steady state; out must
+ * not alias a, b, or a scratch slot. Peak live polynomial storage is bounded
  * by about 11*n field elements, including recursive calls. */
 template<typename F>
-void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, size_t n, const F& field) {
+void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, size_t n, const F& field, TraceModScratch<F>& scratch, size_t level) {
     typedef typename F::Elem Elem;
     if (n == 0 || a.empty() || b.empty()) {
         out.assign(n, 0);
@@ -143,10 +163,12 @@ void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vecto
     size_t split = (n + 1) / 2;
     size_t a0_len = std::min(a.size(), split);
     size_t b0_len = std::min(b.size(), split);
-    std::vector<Elem> a0(a.begin(), a.begin() + a0_len);
-    std::vector<Elem> b0(b.begin(), b.begin() + b0_len);
-    std::vector<Elem> z0;
-    TraceModPolyMulFull(a0, b0, z0, field);
+    auto& a0 = scratch.Get(level, 0);
+    auto& b0 = scratch.Get(level, 1);
+    auto& z0 = scratch.Get(level, 2);
+    a0.assign(a.begin(), a.begin() + a0_len);
+    b0.assign(b.begin(), b.begin() + b0_len);
+    TraceModPolyMulFull(a0, b0, z0, field, scratch, level + 1);
     if (z0.size() > n) z0.resize(n);
 
     out.assign(n, 0);
@@ -154,7 +176,10 @@ void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vecto
     if (split >= n) return;
 
     size_t mid_n = n - split;
-    std::vector<Elem> a1, b1;
+    auto& a1 = scratch.Get(level, 3);
+    auto& b1 = scratch.Get(level, 4);
+    a1.clear();
+    b1.clear();
     if (a.size() > split) a1.assign(a.begin() + split, a.begin() + std::min(a.size(), n));
     if (b.size() > split) b1.assign(b.begin() + split, b.begin() + std::min(b.size(), n));
     if (a1.empty() && b1.empty()) return;
@@ -162,7 +187,10 @@ void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vecto
     if (!a1.empty() && !b1.empty()) {
         size_t asum_len = std::max(a0.size(), a1.size());
         size_t bsum_len = std::max(b0.size(), b1.size());
-        std::vector<Elem> asum(asum_len, 0), bsum(bsum_len, 0);
+        auto& asum = scratch.Get(level, 5);
+        auto& bsum = scratch.Get(level, 6);
+        asum.assign(asum_len, 0);
+        bsum.assign(bsum_len, 0);
         for (size_t i = 0; i < asum_len; ++i) {
             if (i < a0.size()) asum[i] ^= a0[i];
             if (i < a1.size()) asum[i] ^= a1[i];
@@ -171,30 +199,32 @@ void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vecto
             if (i < b0.size()) bsum[i] ^= b0[i];
             if (i < b1.size()) bsum[i] ^= b1[i];
         }
-        std::vector<Elem> zsum, z2;
-        TraceModPolyMulLow(asum, bsum, zsum, mid_n, field);
-        TraceModPolyMulLow(a1, b1, z2, mid_n, field);
+        auto& zsum = scratch.Get(level, 7);
+        auto& z2 = scratch.Get(level, 8);
+        TraceModPolyMulLow(asum, bsum, zsum, mid_n, field, scratch, level + 1);
+        TraceModPolyMulLow(a1, b1, z2, mid_n, field, scratch, level + 1);
         for (size_t i = 0; i < mid_n; ++i) {
             Elem v = (i < zsum.size() ? zsum[i] : Elem(0)) ^ (i < z2.size() ? z2[i] : Elem(0)) ^ (i < z0.size() ? z0[i] : Elem(0));
             out[split + i] ^= v;
         }
     } else {
-        std::vector<Elem> tmp;
+        auto& tmp = scratch.Get(level, 7);
         if (!a1.empty()) {
-            TraceModPolyMulLow(a1, b0, tmp, mid_n, field);
+            TraceModPolyMulLow(a1, b0, tmp, mid_n, field, scratch, level + 1);
             for (size_t i = 0; i < tmp.size(); ++i) out[split + i] ^= tmp[i];
         }
         if (!b1.empty()) {
-            TraceModPolyMulLow(a0, b1, tmp, mid_n, field);
+            TraceModPolyMulLow(a0, b1, tmp, mid_n, field, scratch, level + 1);
             for (size_t i = 0; i < tmp.size(); ++i) out[split + i] ^= tmp[i];
         }
     }
 }
 
 /** Compute the full product a*b in F[x] using the same characteristic-2 Karatsuba identity.
- * Peak live polynomial storage is bounded by about 10*n field elements, including recursive calls. */
+ * Same scratch-slot discipline as TraceModPolyMulLow. Peak live polynomial
+ * storage is bounded by about 10*n field elements, including recursive calls. */
 template<typename F>
-void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, const F& field) {
+void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, const F& field, TraceModScratch<F>& scratch, size_t level) {
     typedef typename F::Elem Elem;
     if (a.empty() || b.empty()) {
         out.clear();
@@ -205,19 +235,31 @@ void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vect
         return;
     }
     size_t split = (std::max(a.size(), b.size()) + 1) / 2;
-    std::vector<Elem> a0(a.begin(), a.begin() + std::min(a.size(), split));
-    std::vector<Elem> b0(b.begin(), b.begin() + std::min(b.size(), split));
-    std::vector<Elem> a1, b1;
+    auto& a0 = scratch.Get(level, 0);
+    auto& b0 = scratch.Get(level, 1);
+    auto& a1 = scratch.Get(level, 2);
+    auto& b1 = scratch.Get(level, 3);
+    a0.assign(a.begin(), a.begin() + std::min(a.size(), split));
+    b0.assign(b.begin(), b.begin() + std::min(b.size(), split));
+    a1.clear();
+    b1.clear();
     if (a.size() > split) a1.assign(a.begin() + split, a.end());
     if (b.size() > split) b1.assign(b.begin() + split, b.end());
 
-    std::vector<Elem> z0, z1, z2;
-    TraceModPolyMulFull(a0, b0, z0, field);
-    if (!a1.empty() && !b1.empty()) TraceModPolyMulFull(a1, b1, z2, field);
+    auto& z0 = scratch.Get(level, 4);
+    auto& z1 = scratch.Get(level, 5);
+    auto& z2 = scratch.Get(level, 6);
+    z1.clear();
+    z2.clear();
+    TraceModPolyMulFull(a0, b0, z0, field, scratch, level + 1);
+    if (!a1.empty() && !b1.empty()) TraceModPolyMulFull(a1, b1, z2, field, scratch, level + 1);
 
     size_t asum_len = std::max(a0.size(), a1.size());
     size_t bsum_len = std::max(b0.size(), b1.size());
-    std::vector<Elem> asum(asum_len, 0), bsum(bsum_len, 0);
+    auto& asum = scratch.Get(level, 7);
+    auto& bsum = scratch.Get(level, 8);
+    asum.assign(asum_len, 0);
+    bsum.assign(bsum_len, 0);
     for (size_t i = 0; i < asum_len; ++i) {
         if (i < a0.size()) asum[i] ^= a0[i];
         if (i < a1.size()) asum[i] ^= a1[i];
@@ -228,7 +270,7 @@ void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vect
     }
     while (!asum.empty() && asum.back() == 0) asum.pop_back();
     while (!bsum.empty() && bsum.back() == 0) bsum.pop_back();
-    if (!asum.empty() && !bsum.empty()) TraceModPolyMulFull(asum, bsum, z1, field);
+    if (!asum.empty() && !bsum.empty()) TraceModPolyMulFull(asum, bsum, z1, field, scratch, level + 1);
 
     out.assign(a.size() + b.size() - 1, 0);
     for (size_t i = 0; i < z0.size(); ++i) out[i] ^= z0[i];
@@ -241,20 +283,25 @@ void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vect
     while (!out.empty() && out.back() == 0) out.pop_back();
 }
 
-/** Compute f(x)*g(x)^2 mod x^n. Writing y=x^2, g(x)^2=h(y), and
- * f(x)=f_even(y)+x*f_odd(y), so the product is f_even(y)*h(y) + x*f_odd(y)*h(y). */
+/** Compute f(x)*g(x)^2 mod x^n into out. Writing y=x^2, g(x)^2=h(y), and
+ * f(x)=f_even(y)+x*f_odd(y), so the product is f_even(y)*h(y) + x*f_odd(y)*h(y).
+ * out must not alias f, g, or a scratch slot. */
 template<typename F>
-std::vector<typename F::Elem> TraceModMulBySquareLow(const std::vector<typename F::Elem>& f, const std::vector<typename F::Elem>& g, size_t n, const F& field) {
-    typedef typename F::Elem Elem;
-    if (n == 0 || f.empty() || g.empty()) return {};
+void TraceModMulBySquareLow(const std::vector<typename F::Elem>& f, const std::vector<typename F::Elem>& g, std::vector<typename F::Elem>& out, size_t n, const F& field, TraceModScratch<F>& scratch, size_t level) {
+    out.clear();
+    if (n == 0 || f.empty() || g.empty()) return;
     size_t even_n = (n + 1) / 2;
     size_t odd_n = n / 2;
-    std::vector<Elem> h(std::min(g.size(), even_n));
+    auto& h = scratch.Get(level, 0);
+    h.resize(std::min(g.size(), even_n));
     for (size_t i = 0; i < h.size(); ++i) h[i] = field.Sqr(g[i]);
     while (!h.empty() && h.back() == 0) h.pop_back();
-    if (h.empty()) return {};
+    if (h.empty()) return;
 
-    std::vector<Elem> f_even, f_odd;
+    auto& f_even = scratch.Get(level, 1);
+    auto& f_odd = scratch.Get(level, 2);
+    f_even.clear();
+    f_odd.clear();
     for (size_t i = 0; i < f.size() && i < n; ++i) {
         if (i & 1) f_odd.push_back(f[i]);
         else f_even.push_back(f[i]);
@@ -262,31 +309,62 @@ std::vector<typename F::Elem> TraceModMulBySquareLow(const std::vector<typename 
     while (!f_even.empty() && f_even.back() == 0) f_even.pop_back();
     while (!f_odd.empty() && f_odd.back() == 0) f_odd.pop_back();
 
-    std::vector<Elem> even_prod, odd_prod, out(n, 0);
-    TraceModPolyMulLow(f_even, h, even_prod, even_n, field);
-    TraceModPolyMulLow(f_odd, h, odd_prod, odd_n, field);
+    auto& even_prod = scratch.Get(level, 3);
+    auto& odd_prod = scratch.Get(level, 4);
+    TraceModPolyMulLow(f_even, h, even_prod, even_n, field, scratch, level + 1);
+    TraceModPolyMulLow(f_odd, h, odd_prod, odd_n, field, scratch, level + 1);
+    out.assign(n, 0);
     for (size_t i = 0; i < even_prod.size() && 2 * i < n; ++i) out[2 * i] = even_prod[i];
     for (size_t i = 0; i < odd_prod.size() && 2 * i + 1 < n; ++i) out[2 * i + 1] = odd_prod[i];
     while (!out.empty() && out.back() == 0) out.pop_back();
-    return out;
 }
 
-/** Compute 1/f mod x^n in F[[x]], assuming f(0)=1. In characteristic 2,
- * Newton iteration is g' = f*g^2 mod x^(2m): if f*g = 1+e, then f*g' = (f*g)^2 = 1+e^2. */
+/** Compute 1/f mod x^n into out, assuming f(0)=1. In characteristic 2,
+ * Newton iteration is g' = f*g^2 mod x^(2m): if f*g = 1+e, then f*g' = (f*g)^2 = 1+e^2.
+ * Uses scratch levels 0 and up; out must not alias f or a scratch slot. */
 template<typename F>
-std::vector<typename F::Elem> TraceModInvSeries(const std::vector<typename F::Elem>& f, size_t n, const F& field) {
-    typedef typename F::Elem Elem;
+void TraceModInvSeries(const std::vector<typename F::Elem>& f, size_t n, std::vector<typename F::Elem>& out, const F& field, TraceModScratch<F>& scratch) {
     CHECK_SAFE(n > 0 && !f.empty() && f[0] == 1);
-    std::vector<Elem> g(1, 1);
+    out.assign(1, 1);
+    auto& next_g = scratch.Get(0, 5);
     size_t m = 1;
     while (m < n) {
         size_t next = std::min(2 * m, n);
-        g = TraceModMulBySquareLow(f, g, next, field);
-        if (g.empty()) g.push_back(0);
+        TraceModMulBySquareLow(f, out, next_g, next, field, scratch, 1);
+        if (next_g.empty()) next_g.push_back(0);
+        out.swap(next_g);
         m = next;
     }
-    g.resize(n, 0);
-    return g;
+    out.resize(n, 0);
+}
+
+/* Scratch-free convenience wrappers (used by the unit and fuzz test layers). */
+template<typename F>
+void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, size_t n, const F& field) {
+    TraceModScratch<F> scratch;
+    TraceModPolyMulLow(a, b, out, n, field, scratch, 0);
+}
+
+template<typename F>
+void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, const F& field) {
+    TraceModScratch<F> scratch;
+    TraceModPolyMulFull(a, b, out, field, scratch, 0);
+}
+
+template<typename F>
+std::vector<typename F::Elem> TraceModMulBySquareLow(const std::vector<typename F::Elem>& f, const std::vector<typename F::Elem>& g, size_t n, const F& field) {
+    TraceModScratch<F> scratch;
+    std::vector<typename F::Elem> out;
+    TraceModMulBySquareLow(f, g, out, n, field, scratch, 0);
+    return out;
+}
+
+template<typename F>
+std::vector<typename F::Elem> TraceModInvSeries(const std::vector<typename F::Elem>& f, size_t n, const F& field) {
+    TraceModScratch<F> scratch;
+    std::vector<typename F::Elem> out;
+    TraceModInvSeries(f, n, out, field, scratch);
+    return out;
 }
 
 /** Compute repeated TraceMod operations with a fixed modulus.
@@ -306,6 +384,13 @@ class TraceMod {
     std::vector<Elem> rows;
 
     std::vector<Elem> rev_mod, inv;
+
+    // Reused buffers for SquareReduce/ReciprocalReduce, and the scratch pool
+    // for the Karatsuba multiplications, hoisted here so the trace loop is
+    // allocation-free in steady state.
+    std::vector<Elem> sqr_tmp;
+    std::vector<Elem> rev_val, q_rev, quot, prod;
+    TraceModScratch<F> scratch;
 
 public:
     TraceMod(const std::vector<Elem>& mod_in, const F& field_in) : mod(mod_in), field(field_in), use_square_table(mod_in.size() - 1 < TRACEMOD_TABLE_CUTOFF), d(mod_in.size() - 1), first_even(0) {
@@ -340,7 +425,7 @@ public:
             size_t m = mod.size();
             rev_mod.resize(m);
             for (size_t i = 0; i < m; ++i) rev_mod[i] = mod[m - 1 - i];
-            inv = TraceModInvSeries(rev_mod, m - 1, field);
+            TraceModInvSeries(rev_mod, m - 1, inv, field, scratch);
         }
     }
 
@@ -351,43 +436,41 @@ private:
         return rows.data() + ((e - first_even) / 2) * d;
     }
 
-    void SquareReduce(std::vector<Elem>& val) const {
-        std::vector<Elem> tmp;
-        tmp.assign(d, 0);
+    void SquareReduce(std::vector<Elem>& val) {
+        sqr_tmp.assign(d, 0);
         for (size_t i = 0; i < val.size(); ++i) {
             if (val[i] == 0) continue;
             Elem coeff = field.Sqr(val[i]);
             size_t e = 2 * i;
             if (e < d) {
-                tmp[e] ^= coeff;
+                sqr_tmp[e] ^= coeff;
             } else {
                 const Elem* row = Row(e);
                 if (coeff == 1) {
-                    for (size_t j = 0; j < d; ++j) tmp[j] ^= row[j];
+                    for (size_t j = 0; j < d; ++j) sqr_tmp[j] ^= row[j];
                 } else {
                     typename F::Multiplier mul(field, coeff);
-                    for (size_t j = 0; j < d; ++j) tmp[j] ^= mul(row[j]);
+                    for (size_t j = 0; j < d; ++j) sqr_tmp[j] ^= mul(row[j]);
                 }
             }
         }
-        val.swap(tmp);
+        // The swap donates val's old buffer back as the next call's scratch.
+        val.swap(sqr_tmp);
         while (!val.empty() && val.back() == 0) val.pop_back();
     }
 
-    void ReciprocalReduce(std::vector<Elem>& val) const {
+    void ReciprocalReduce(std::vector<Elem>& val) {
         size_t m = mod.size();
         if (val.size() < m) return;
         size_t k = val.size() - m + 1;
-        std::vector<Elem> rev_val(k);
+        rev_val.resize(k);
         for (size_t i = 0; i < k; ++i) rev_val[i] = val[val.size() - 1 - i];
-        std::vector<Elem> q_rev;
-        TraceModPolyMulLow(rev_val, inv, q_rev, k, field);
-        std::vector<Elem> q(k);
-        for (size_t i = 0; i < k; ++i) q[k - 1 - i] = q_rev[i];
-        while (!q.empty() && q.back() == 0) q.pop_back();
+        TraceModPolyMulLow(rev_val, inv, q_rev, k, field, scratch, 0);
+        quot.resize(k);
+        for (size_t i = 0; i < k; ++i) quot[k - 1 - i] = q_rev[i];
+        while (!quot.empty() && quot.back() == 0) quot.pop_back();
         size_t rem_len = m - 1;
-        std::vector<Elem> prod;
-        TraceModPolyMulLow(q, mod, prod, rem_len, field);
+        TraceModPolyMulLow(quot, mod, prod, rem_len, field, scratch, 0);
         for (size_t i = 0; i < prod.size(); ++i) val[i] ^= prod[i];
         val.resize(rem_len);
         while (!val.empty() && val.back() == 0) val.pop_back();
@@ -395,7 +478,7 @@ private:
 
 public:
     /** val := val^2 mod mod. Requires val to be reduced already (val.size() <= deg(mod)). */
-    void SquareAndReduce(std::vector<Elem>& val) const {
+    void SquareAndReduce(std::vector<Elem>& val) {
         CHECK_SAFE(val.size() <= d);
         if (use_square_table) {
             SquareReduce(val);
@@ -405,7 +488,7 @@ public:
         }
     }
 
-    void trace(std::vector<Elem>& out, const Elem& param) const {
+    void trace(std::vector<Elem>& out, const Elem& param) {
         if (use_square_table) {
             out.resize(2);
             out[0] = 0;
