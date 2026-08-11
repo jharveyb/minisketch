@@ -141,6 +141,18 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
             for (size_t j = 0; j < cur.size(); ++j) acc[j] ^= cur[j];
         }
         FUZZ_CHECK(ut::Stripped(trace) == ut::Stripped(acc));
+
+        // Repeated use of one reducer object, and SquareAndReduce against the
+        // naive reference.
+        std::vector<Elem> trace2;
+        trace_mod.trace(trace2, param);
+        FUZZ_CHECK(trace2 == trace);
+        auto val = ConsumePoly(provider, field, mod.size() - 1);
+        auto reduced = val;
+        trace_mod.SquareAndReduce(reduced);
+        auto ref_sq = ut::PolyMulRef(val, val, field);
+        ut::PolyReduceRef(ref_sq, mod, field);
+        FUZZ_CHECK(ut::Stripped(reduced) == ref_sq);
     }
 
     // BerlekampMassey on syndromes of a known root set returns prod (1 + m*x);

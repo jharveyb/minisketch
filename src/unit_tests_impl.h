@@ -267,6 +267,26 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
         auto prod = PolyMulRef(f, inv, field);
         prod.resize(std::max(prod.size(), k), 0);
         for (size_t j = 0; j < k; ++j) UT_REQUIRE(prod[j] == (j == 0 ? 1 : 0));
+
+        // Repeated use of one reducer object (results must not depend on
+        // earlier calls), and SquareAndReduce against the naive reference.
+        auto tmod = RandMonicPoly(rng, field, 4 + rng.RandRange(12));
+        TraceMod<F> trace_mod(tmod, field);
+        Elem p1 = RandNonzeroElem(rng, field), p2 = RandNonzeroElem(rng, field);
+        std::vector<Elem> t1, t2, t1_again;
+        trace_mod.trace(t1, p1);
+        trace_mod.trace(t2, p2);
+        trace_mod.trace(t1_again, p1);
+        UT_REQUIRE(Stripped(t1) == TraceModRefImpl(tmod, p1, field));
+        UT_REQUIRE(Stripped(t2) == TraceModRefImpl(tmod, p2, field));
+        UT_REQUIRE(t1_again == t1);
+
+        auto val = RandPoly(rng, field, 1 + rng.RandRange(tmod.size() - 1));
+        auto reduced = val;
+        trace_mod.SquareAndReduce(reduced);
+        auto ref_sq = PolyMulRef(val, val, field);
+        PolyReduceRef(ref_sq, tmod, field);
+        UT_REQUIRE(Stripped(reduced) == ref_sq);
     }
 
     // The reciprocal reducer path (degree >= TRACEMOD_TABLE_CUTOFF) against
@@ -279,6 +299,14 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
         std::vector<Elem> out;
         trace_mod.trace(out, param);
         UT_REQUIRE(Stripped(out) == TraceModRefImpl(tmod, param, field));
+
+        // SquareAndReduce through the reciprocal path.
+        auto val = RandPoly(rng, field, 1 + rng.RandRange(tmod.size() - 1));
+        auto reduced = val;
+        trace_mod.SquareAndReduce(reduced);
+        auto ref_sq = PolyMulRef(val, val, field);
+        PolyReduceRef(ref_sq, tmod, field);
+        UT_REQUIRE(Stripped(reduced) == ref_sq);
     }
 }
 
