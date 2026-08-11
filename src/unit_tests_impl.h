@@ -289,6 +289,31 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
         UT_REQUIRE(Stripped(reduced) == ref_sq);
     }
 
+    // One scratch pool shared across mixed-size scratch-threaded calls, as the
+    // reducer does internally: results must not depend on what earlier calls
+    // left behind in the slots.
+    {
+        TraceModScratch<F> scratch;
+        for (int rep = 0; rep < 4; ++rep) {
+            auto a = RandPoly(rng, field, 1 + rng.RandRange(80));
+            auto b = RandPoly(rng, field, 1 + rng.RandRange(80));
+            std::vector<Elem> full;
+            TraceModPolyMulFull(a, b, full, field, scratch, 0);
+            UT_REQUIRE(Stripped(full) == PolyMulRef(a, b, field));
+            size_t n = 1 + rng.RandRange(80);
+            std::vector<Elem> low;
+            TraceModPolyMulLow(a, b, low, n, field, scratch, 0);
+            auto ref = PolyMulRef(a, b, field);
+            ref.resize(n, 0);
+            UT_REQUIRE(Stripped(low) == Stripped(ref));
+            std::vector<Elem> fg2;
+            TraceModMulBySquareLow(a, b, fg2, n, field, scratch, 0);
+            auto ref2 = PolyMulRef(a, PolyMulRef(b, b, field), field);
+            ref2.resize(n, 0);
+            UT_REQUIRE(Stripped(fg2) == Stripped(ref2));
+        }
+    }
+
     // The reciprocal reducer path (degree >= TRACEMOD_TABLE_CUTOFF) against
     // the naive reference; only for one cheap field, as the reference is
     // quadratic in the degree.
@@ -307,6 +332,12 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
         auto ref_sq = PolyMulRef(val, val, field);
         PolyReduceRef(ref_sq, tmod, field);
         UT_REQUIRE(Stripped(reduced) == ref_sq);
+
+        // A repeated trace on the same object must be unaffected by the
+        // buffers earlier calls left behind.
+        std::vector<Elem> out2;
+        trace_mod.trace(out2, param);
+        UT_REQUIRE(out2 == out);
     }
 }
 
