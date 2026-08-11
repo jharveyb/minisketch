@@ -224,9 +224,16 @@ Specific algorithms and optimizations used:
 * A (possibly) novel optimization combines a test for unique roots with the Berlekamp trace algorithm.
 * Two different precomputation approaches for efficient reduction mod a polynomial in the BTA computation of the trace.
 
+See [doc/optimizations.md](doc/optimizations.md) for the decode cost model, notes on
+the optimizations above, and analysis of the deferred ideas below.
+
 Some improvements that are still TODO:
-* Explicit formulas for the roots of polynomials of higher degree than 2
-* Subquadratic multiplication and modulus algorithms
+* Explicit formulas for the roots of polynomials of higher degree than 2 (a
+  Berlekamp-Rumsey-Solomon attempt measured slower than the reducer-based trace at
+  every field size; see doc/optimizations.md)
+* Subquadratic multiplication and modulus algorithms beyond the trace stage (the
+  trace reduction already uses Karatsuba and a Newton reciprocal series; GCD,
+  division and Berlekamp-Massey remain quadratic)
 * The [Half-GCD algorithm](http://mathworld.wolfram.com/Half-GCD.html) for faster GCDs
 * An interface for incremental decoding: most of the computation in most failed decodes can be reused when attempting to decode a longer sketch of the same set
 * Platform specific optimizations for platforms other than x86
