@@ -394,6 +394,17 @@ private:
     }
 
 public:
+    /** val := val^2 mod mod. Requires val to be reduced already (val.size() <= deg(mod)). */
+    void SquareAndReduce(std::vector<Elem>& val) const {
+        CHECK_SAFE(val.size() <= d);
+        if (use_square_table) {
+            SquareReduce(val);
+        } else {
+            Sqr(val, field);
+            ReciprocalReduce(val);
+        }
+    }
+
     void trace(std::vector<Elem>& out, const Elem& param) const {
         if (use_square_table) {
             out.resize(2);
@@ -512,12 +523,14 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
                 // fully factorizable (or at least pushes the test down the
                 // recursion to factors which are smaller and thus faster).
                 tmp = trace;
-                Sqr(tmp, field);
+                trace_mod.SquareAndReduce(tmp);
+                // (trace^2 + trace) mod poly == (trace^2 mod poly) + trace,
+                // as deg(trace) < deg(poly).
+                if (tmp.size() < trace.size()) tmp.resize(trace.size(), 0);
                 for (size_t i = 0; i < trace.size(); ++i) {
                     tmp[i] ^= trace[i];
                 }
                 while (tmp.size() && tmp.back() == 0) tmp.pop_back();
-                PolyMod(poly, tmp, field);
 
                 // Whenever the test fails, we can immediately abort the root
                 // finding. Whenever it succeeds, we can remember and pass down
