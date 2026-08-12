@@ -342,11 +342,11 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
         UT_REQUIRE(out2 == out);
     }
 
-    // The same reciprocal-path property once through the additive-FFT tier
-    // (products of degree ~2*TRACEMOD_TABLE_CUTOFF exceed the FFT cutoff for
-    // the 32-bit field; the 11-bit case above keeps covering pure Karatsuba).
+    // The same reciprocal-path property once through the additive-FFT tier,
+    // just past the (lower) table cutoff of FFT-capable fields; the 11-bit
+    // case above keeps covering the pure Karatsuba reciprocal path.
     if (field.Bits() == 32) {
-        auto tmod = RandMonicPoly(rng, field, TRACEMOD_TABLE_CUTOFF + 2);
+        auto tmod = RandMonicPoly(rng, field, TRACEMOD_FFT_TABLE_CUTOFF + 2);
         Elem param = RandNonzeroElem(rng, field);
         TraceMod<F> trace_mod(tmod, field);
         std::vector<Elem> out;
@@ -375,9 +375,10 @@ void TestAdditiveFFT(const F& field, TestRand& rng, size_t iters) {
     const int bits = field.Bits();
     const bool eligible_field = bits >= 16 && (bits & (bits - 1)) == 0;
 
-    // Gating: never below the product-length cutoff, never for non-power-of-2
-    // degrees, never with an unbalanced (short) operand.
-    UT_REQUIRE(!TraceModFFTEligible(field, 100, 100));
+    // Gating: never below the product-length cutoff (probe just under it),
+    // never for non-power-of-2 degrees, never with an unbalanced (short)
+    // operand.
+    UT_REQUIRE(!TraceModFFTEligible(field, TRACEMOD_FFT_CUTOFF / 2, TRACEMOD_FFT_CUTOFF / 2));
     UT_REQUIRE(!TraceModFFTEligible(field, 1000, TRACEMOD_POLYMUL_CUTOFF));
     UT_REQUIRE(TraceModFFTEligible(field, 400, 400) == eligible_field);
     if (!eligible_field) return;
