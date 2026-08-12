@@ -19,8 +19,8 @@ static const size_t TRACEMOD_POLYMUL_CUTOFF = 24;
 static const size_t TRACEMOD_TABLE_CUTOFF = 512;
 static const size_t TRACEMOD_FFT_TABLE_CUTOFF = 256;
 static const size_t TRACEMOD_FFT_CUTOFF = 128;
-static const size_t FAST_DIVMOD_CUTOFF = 128;
-static const size_t HGCD_CUTOFF = 128;
+static const size_t FAST_DIVMOD_CUTOFF = 512;
+static const size_t HGCD_CUTOFF = 1024;
 static const size_t HGCD_ITER_CROSSOVER = 24;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
@@ -136,18 +136,24 @@ bool TraceModFFTCapable(const F& field) {
     return bits >= 16 && (bits & (bits - 1)) == 0;
 }
 
+/** Whether the field implementation's scalar Multiplier is a plain wrapper
+ * (the CLMUL fields, which store just the element) rather than a
+ * precomputation table (the generic fields, which pay a table build per
+ * use). Several cutoffs below depend on this distinction. */
+template<typename F>
+constexpr bool TraceModCheapScalarMul() {
+    return sizeof(typename F::Multiplier) <= 2 * sizeof(typename F::Elem);
+}
+
 /** The degree at which TraceMod switches from the square-table reducer to
  * the reciprocal reducer. The additive-FFT tier makes the reciprocal path's
  * multiplications cheap enough that the crossover halves - but only for
- * field implementations whose scalar Multiplier is a plain wrapper (the
- * CLMUL fields, where it stores just the element). Implementations whose
- * Multiplier builds a precomputation table (the generic fields) pay that
- * build per FFT block, which keeps their crossover at the original value;
- * the Multiplier size distinguishes the two. */
+ * field implementations with a cheap scalar Multiplier; the generic fields
+ * pay a Multiplier table build per FFT block, which keeps their crossover
+ * at the original value. */
 template<typename F>
 size_t TraceModTableCutoff(const F& field) {
-    const bool cheap_scalar_mul = sizeof(typename F::Multiplier) <= 2 * sizeof(typename F::Elem);
-    return (TraceModFFTCapable(field) && cheap_scalar_mul) ? TRACEMOD_FFT_TABLE_CUTOFF : TRACEMOD_TABLE_CUTOFF;
+    return (TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) ? TRACEMOD_FFT_TABLE_CUTOFF : TRACEMOD_TABLE_CUTOFF;
 }
 
 /** Whether the additive-FFT multiplication tier applies to a product of
@@ -426,16 +432,27 @@ std::vector<typename F::Elem> TraceModInvSeries(const std::vector<typename F::El
     return out;
 }
 
+/** The FastDivMod engage threshold for a field: the measured win requires
+ * the FFT tier and a cheap scalar Multiplier (the strong schoolbook
+ * baseline is hard to beat otherwise); ineligible fields always take the
+ * schoolbook path. */
+template<typename F>
+size_t FastDivModCutoff(const F& field) {
+    if (!TraceModFFTCapable(field) || !TraceModCheapScalarMul<F>()) return std::numeric_limits<size_t>::max();
+    return FAST_DIVMOD_CUTOFF;
+}
+
 /** Subquadratic DivMod, same contract as DivMod: divide val by monic mod,
  * quotient into div (leading coefficient nonzero), remainder into val (size
  * mod.size() - 1, not stripped). Uses the reciprocal method of
  * ReciprocalReduce as a one-shot division: the reversed quotient is
  * rev(val) * InvSeries(rev(mod)) mod x^k, and the remainder follows from one
- * more low product. Falls back to the schoolbook DivMod below
- * FAST_DIVMOD_CUTOFF or for fields without the FFT tier, where the
- * reciprocal setup does not pay for itself. */
+ * more low product. Falls back to the schoolbook DivMod when the smaller of
+ * quotient length and divisor degree is at most `cutoff` (pass
+ * FastDivModCutoff(field); tests pass smaller values to exercise the
+ * reciprocal path at small sizes). */
 template<typename F>
-void FastDivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::Elem>& val, std::vector<typename F::Elem>& div, const F& field) {
+void FastDivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::Elem>& val, std::vector<typename F::Elem>& div, const F& field, size_t cutoff) {
     typedef typename F::Elem Elem;
     size_t m = mod.size();
     CHECK_SAFE(m > 0 && mod.back() == 1);
@@ -444,7 +461,7 @@ void FastDivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F
         return;
     }
     size_t k = val.size() - m + 1;
-    if (!TraceModFFTCapable(field) || std::min(k, m - 1) <= FAST_DIVMOD_CUTOFF) {
+    if (std::min(k, m - 1) <= cutoff) {
         DivMod(mod, val, div, field);
         return;
     }
@@ -649,30 +666,42 @@ void HalfGCDMatrix(PolyMat22<F>& mat, const std::vector<typename F::Elem>& u_in,
     PolyMat22Mul(mat, m2, m1, field, scratch);
 }
 
-/** Compute the GCD of a and b like GCD (result in a, b destroyed, inputs
- * stripped), using half-gcd reductions above HGCD_CUTOFF for fields with
- * the FFT multiplication tier, and the quadratic loop otherwise. */
+/** The FastGCD engage threshold for a field, on the same eligibility terms
+ * as FastDivModCutoff. The measured crossover against the quadratic loop is
+ * high: the schoolbook remainder steps are Multiplier-based and
+ * allocation-free, so the half-gcd's matrix machinery only pays at
+ * top-of-tree degrees. */
 template<typename F>
-void FastGCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, const F& field) {
+size_t FastGCDCutoff(const F& field) {
+    if (!TraceModFFTCapable(field) || !TraceModCheapScalarMul<F>()) return std::numeric_limits<size_t>::max();
+    return HGCD_CUTOFF;
+}
+
+/** Compute the GCD of a and b like GCD (result in a, b destroyed, inputs
+ * stripped), using half-gcd reductions while operands are longer than
+ * `cutoff` (pass FastGCDCutoff(field); tests pass smaller values to
+ * exercise the half-gcd at small sizes), and the quadratic loop below. */
+template<typename F>
+void FastGCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, const F& field, size_t cutoff) {
     typedef typename F::Elem Elem;
     PolyStrip(a);
     PolyStrip(b);
     if (a.size() < b.size()) std::swap(a, b);
-    if (!TraceModFFTCapable(field) || b.size() <= HGCD_CUTOFF) {
+    if (b.size() <= cutoff) {
         GCD(a, b, field);
         return;
     }
     TraceModScratch<F> scratch;
     PolyMat22<F> mat;
     std::vector<Elem> q;
-    while (!b.empty() && b.size() > HGCD_CUTOFF) {
+    while (!b.empty() && b.size() > cutoff) {
         size_t deg_a = a.size() - 1;
         size_t d_red = (deg_a + 1) / 2;
         if (b.size() == a.size() || b.size() - 1 + d_red <= deg_a) {
             // Equal degrees, or the gap already exceeds the half-gcd target:
             // take one division step (subquadratic for large quotients).
             MakeMonic(b, field);
-            FastDivMod(b, a, q, field);
+            FastDivMod(b, a, q, field, cutoff);
             PolyStrip(a);
             std::swap(a, b);
             continue;
@@ -999,14 +1028,14 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             randv = field.Mul2(randv);
             tmp = poly;
             MINISKETCH_COZ_BEGIN("findroots-gcd");
-            FastGCD(trace, tmp, field);
+            FastGCD(trace, tmp, field, FastGCDCutoff(field));
             MINISKETCH_COZ_END("findroots-gcd");
             if (trace.size() != poly.size() && trace.size() > 1) break;
         }
     }
     MakeMonic(trace, field);
     MINISKETCH_COZ_BEGIN("findroots-divmod");
-    FastDivMod(trace, poly, tmp, field);
+    FastDivMod(trace, poly, tmp, field, FastDivModCutoff(field));
     MINISKETCH_COZ_END("findroots-divmod");
     // At this point, the stack looks like [... (poly) tmp trace], and we want to recursively
     // find roots of trace and tmp (= poly/trace). As we don't care about poly anymore, move

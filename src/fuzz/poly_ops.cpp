@@ -280,7 +280,7 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
         auto val = ConsumePoly(provider, field, 380);
         std::vector<Elem> q_ref, rem_ref = val, q_fast, rem_fast = val;
         DivMod(mod, rem_ref, q_ref, field);
-        FastDivMod(mod, rem_fast, q_fast, field);
+        FastDivMod(mod, rem_fast, q_fast, field, 24);
         FUZZ_CHECK(q_fast == q_ref);
         FUZZ_CHECK(rem_fast == rem_ref);
 
@@ -292,7 +292,7 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
             auto b = ut::PolyMulRef(fb2, fg, field);
             auto a_ref = a, b_ref = b, a_fast = a, b_fast = b;
             GCD(a_ref, b_ref, field);
-            FastGCD(a_fast, b_fast, field);
+            FastGCD(a_fast, b_fast, field, 24);
             FUZZ_CHECK(!a_ref.empty() && !a_fast.empty());
             MakeMonic(a_ref, field);
             MakeMonic(a_fast, field);
