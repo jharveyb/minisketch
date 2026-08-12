@@ -17,7 +17,8 @@
 
 static const size_t TRACEMOD_POLYMUL_CUTOFF = 24;
 static const size_t TRACEMOD_TABLE_CUTOFF = 512;
-static const size_t TRACEMOD_FFT_CUTOFF = 256;
+static const size_t TRACEMOD_FFT_TABLE_CUTOFF = 256;
+static const size_t TRACEMOD_FFT_CUTOFF = 128;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -123,17 +124,39 @@ void PolyMulLowNaive(const std::vector<typename F::Elem>& a, const std::vector<t
     }
 }
 
+/** Whether the field supports the additive-FFT tier at all: its degree must
+ * be a power of two of at least 16 (the Cantor special basis requirement;
+ * smaller power-of-two fields never reach the product-length cutoff). */
+template<typename F>
+bool TraceModFFTCapable(const F& field) {
+    int bits = field.Bits();
+    return bits >= 16 && (bits & (bits - 1)) == 0;
+}
+
+/** The degree at which TraceMod switches from the square-table reducer to
+ * the reciprocal reducer. The additive-FFT tier makes the reciprocal path's
+ * multiplications cheap enough that the crossover halves - but only for
+ * field implementations whose scalar Multiplier is a plain wrapper (the
+ * CLMUL fields, where it stores just the element). Implementations whose
+ * Multiplier builds a precomputation table (the generic fields) pay that
+ * build per FFT block, which keeps their crossover at the original value;
+ * the Multiplier size distinguishes the two. */
+template<typename F>
+size_t TraceModTableCutoff(const F& field) {
+    const bool cheap_scalar_mul = sizeof(typename F::Multiplier) <= 2 * sizeof(typename F::Elem);
+    return (TraceModFFTCapable(field) && cheap_scalar_mul) ? TRACEMOD_FFT_TABLE_CUTOFF : TRACEMOD_TABLE_CUTOFF;
+}
+
 /** Whether the additive-FFT multiplication tier applies to a product of
- * (truncated) operand lengths la and lb: the field degree must be a power of
- * two of at least 16 (the Cantor special basis requirement; smaller fields
- * never reach the cutoff), the product must be balanced enough and long
- * enough, and 2^t >= la + lb - 1 evaluation points must exist with
- * t <= field.Bits() (a real constraint only for the 16-bit field; the
- * fallback is Karatsuba, whose recursive halves may re-enter this tier). */
+ * (truncated) operand lengths la and lb: the field must support it, the
+ * product must be balanced enough and long enough, and 2^t >= la + lb - 1
+ * evaluation points must exist with t <= field.Bits() (a real constraint
+ * only for the 16-bit field; the fallback is Karatsuba, whose recursive
+ * halves may re-enter this tier). */
 template<typename F>
 bool TraceModFFTEligible(const F& field, size_t la, size_t lb) {
     int bits = field.Bits();
-    if (bits < 16 || (bits & (bits - 1)) != 0) return false;
+    if (!TraceModFFTCapable(field)) return false;
     if (la == 0 || lb == 0) return false;
     if (std::min(la, lb) <= TRACEMOD_POLYMUL_CUTOFF) return false;
     size_t prod = la + lb - 1;
@@ -426,7 +449,7 @@ class TraceMod {
     TraceModScratch<F> scratch;
 
 public:
-    TraceMod(const std::vector<Elem>& mod_in, const F& field_in) : mod(mod_in), field(field_in), use_square_table(mod_in.size() - 1 < TRACEMOD_TABLE_CUTOFF), d(mod_in.size() - 1), first_even(0) {
+    TraceMod(const std::vector<Elem>& mod_in, const F& field_in) : mod(mod_in), field(field_in), use_square_table(mod_in.size() - 1 < TraceModTableCutoff(field_in)), d(mod_in.size() - 1), first_even(0) {
         CHECK_SAFE(!mod.empty() && mod.back() == 1);
         // RecFindRoots handles degree 1 and 2 before constructing this object.
         CHECK_SAFE(d >= 3);
