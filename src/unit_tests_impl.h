@@ -392,6 +392,104 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
     }
 }
 
+/** Properties of the subquadratic division and gcd (FastDivMod, FastGCD):
+ *  equivalence with the schoolbook DivMod and the quadratic GCD at sizes
+ *  crossing their cutoffs. Fields without the FFT tier delegate to the
+ *  quadratic paths internally; they run the small sizes as a pass-through
+ *  check. */
+template<typename F>
+void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
+    typedef typename F::Elem Elem;
+    const bool capable = TraceModFFTCapable(field);
+    const size_t maxdeg = capable ? 7 * HGCD_CUTOFF / 2 : 60;
+
+    for (size_t i = 0; i < iters; ++i) {
+        // FastDivMod == DivMod (quotient and raw remainder buffer alike),
+        // for random numerators and for exactly-divisible ones.
+        size_t dlen = 2 + rng.RandRange(maxdeg);
+        auto mod = RandMonicPoly(rng, field, dlen);
+        auto val = RandPoly(rng, field, dlen + rng.RandRange(maxdeg));
+        std::vector<Elem> q_ref, rem_ref = val, q_fast, rem_fast = val;
+        DivMod(mod, rem_ref, q_ref, field);
+        FastDivMod(mod, rem_fast, q_fast, field);
+        UT_REQUIRE(q_fast == q_ref);
+        UT_REQUIRE(rem_fast == rem_ref);
+
+        auto quot_in = RandPoly(rng, field, 1 + rng.RandRange(maxdeg));
+        auto exact = PolyMulRef(quot_in, mod, field);
+        if (!exact.empty()) {
+            std::vector<Elem> q2, rem2 = exact;
+            FastDivMod(mod, rem2, q2, field);
+            UT_REQUIRE(Stripped(rem2).empty());
+            UT_REQUIRE(Stripped(q2) == Stripped(quot_in));
+        }
+
+        // FastGCD == GCD for operands with a planted common factor.
+        auto f = RandPoly(rng, field, 1 + rng.RandRange(maxdeg));
+        auto g = RandPoly(rng, field, 1 + rng.RandRange(maxdeg / 2 + 1));
+        auto h = RandPoly(rng, field, 1 + rng.RandRange(maxdeg));
+        auto a = PolyMulRef(f, g, field);
+        auto b = PolyMulRef(h, g, field);
+        auto a_ref = a, b_ref = b, a_fast = a, b_fast = b;
+        GCD(a_ref, b_ref, field);
+        FastGCD(a_fast, b_fast, field);
+        UT_REQUIRE(!a_ref.empty() && !a_fast.empty());
+        MakeMonic(a_ref, field);
+        MakeMonic(a_fast, field);
+        UT_REQUIRE(a_fast == a_ref);
+
+        // A remainder sequence built backwards with occasional large
+        // quotients: exercises the non-normal paths of the half-gcd (the
+        // internal division steps and the d2 recursion).
+        std::vector<Elem> r1 = RandPoly(rng, field, 1 + rng.RandRange(8));
+        std::vector<Elem> r0 = RandPoly(rng, field, r1.size() + 1 + rng.RandRange(8));
+        while (r0.size() <= maxdeg && !r0.empty()) {
+            size_t qdeg = 1 + (rng.RandRange(8) == 0 ? rng.RandRange(20) : 0);
+            auto q = RandPoly(rng, field, qdeg + 1);
+            if (q.empty() || q.back() == 0) continue;
+            auto next = PolyMulRef(q, r0, field);
+            for (size_t j = 0; j < r1.size(); ++j) next[j] ^= r1[j];
+            r1.swap(r0);
+            r0.swap(next);
+        }
+        if (!r0.empty() && !r1.empty()) {
+            auto na_ref = r0, nb_ref = r1, na_fast = r0, nb_fast = r1;
+            GCD(na_ref, nb_ref, field);
+            FastGCD(na_fast, nb_fast, field);
+            UT_REQUIRE(!na_ref.empty() && !na_fast.empty());
+            MakeMonic(na_ref, field);
+            MakeMonic(na_fast, field);
+            UT_REQUIRE(na_fast == na_ref);
+        }
+    }
+
+    // Edge cases: empty side, identical operands, one dividing the other,
+    // and coprime pairs reducing to a constant.
+    auto a = RandPoly(rng, field, HGCD_CUTOFF + 20);
+    std::vector<Elem> empty_b;
+    auto a_copy = a;
+    FastGCD(a_copy, empty_b, field);
+    UT_REQUIRE(Stripped(a_copy) == Stripped(a));
+
+    auto same1 = a, same2 = a;
+    FastGCD(same1, same2, field);
+    auto want = a;
+    UT_REQUIRE(!want.empty());
+    MakeMonic(want, field);
+    MakeMonic(same1, field);
+    UT_REQUIRE(same1 == want);
+
+    auto factor = RandMonicPoly(rng, field, HGCD_CUTOFF + 10);
+    auto multiple = PolyMulRef(RandPoly(rng, field, HGCD_CUTOFF / 2), factor, field);
+    if (!multiple.empty()) {
+        auto ma = multiple, mb = factor;
+        FastGCD(ma, mb, field);
+        UT_REQUIRE(!ma.empty());
+        MakeMonic(ma, field);
+        UT_REQUIRE(ma == factor);
+    }
+}
+
 /** Properties of the additive (Cantor-basis) FFT engine and its
  *  multiplication tier. Engine checks run only for eligible fields (degree a
  *  power of two, >= 16); other fields verify they are gated out. */
@@ -696,6 +794,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     // FFT tier internally, so engine bugs are reported at their source.
     TestAdditiveFFT(field, rng, 24);
     TestTraceModReducers(field, rng, 24);
+    TestSubquadraticGCD(field, rng, 10);
     TestSyndromes(field, lowmod, rng, 128, 12);
     TestBerlekampMassey(field, rng, 128, 10);
     TestFindRoots(field, lowmod, rng, 64, 8);
