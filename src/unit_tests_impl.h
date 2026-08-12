@@ -291,16 +291,18 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
 
     // One scratch pool shared across mixed-size scratch-threaded calls, as the
     // reducer does internally: results must not depend on what earlier calls
-    // left behind in the slots.
+    // left behind in the slots. For fields with the additive-FFT tier, sizes
+    // extend beyond the FFT cutoff so the same pool serves both tiers.
     {
+        const size_t maxsize = TraceModFFTEligible(field, 400, 400) ? 700 : 80;
         TraceModScratch<F> scratch;
         for (int rep = 0; rep < 4; ++rep) {
-            auto a = RandPoly(rng, field, 1 + rng.RandRange(80));
-            auto b = RandPoly(rng, field, 1 + rng.RandRange(80));
+            auto a = RandPoly(rng, field, 1 + rng.RandRange(maxsize));
+            auto b = RandPoly(rng, field, 1 + rng.RandRange(maxsize));
             std::vector<Elem> full;
             TraceModPolyMulFull(a, b, full, field, scratch, 0);
             UT_REQUIRE(Stripped(full) == PolyMulRef(a, b, field));
-            size_t n = 1 + rng.RandRange(80);
+            size_t n = 1 + rng.RandRange(maxsize);
             std::vector<Elem> low;
             TraceModPolyMulLow(a, b, low, n, field, scratch, 0);
             auto ref = PolyMulRef(a, b, field);
@@ -339,6 +341,142 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
         trace_mod.trace(out2, param);
         UT_REQUIRE(out2 == out);
     }
+
+    // The same reciprocal-path property once through the additive-FFT tier
+    // (products of degree ~2*TRACEMOD_TABLE_CUTOFF exceed the FFT cutoff for
+    // the 32-bit field; the 11-bit case above keeps covering pure Karatsuba).
+    if (field.Bits() == 32) {
+        auto tmod = RandMonicPoly(rng, field, TRACEMOD_TABLE_CUTOFF + 2);
+        Elem param = RandNonzeroElem(rng, field);
+        TraceMod<F> trace_mod(tmod, field);
+        std::vector<Elem> out;
+        trace_mod.trace(out, param);
+        UT_REQUIRE(Stripped(out) == TraceModRefImpl(tmod, param, field));
+
+        auto val = RandPoly(rng, field, 1 + rng.RandRange(tmod.size() - 1));
+        auto reduced = val;
+        trace_mod.SquareAndReduce(reduced);
+        auto ref_sq = PolyMulRef(val, val, field);
+        PolyReduceRef(ref_sq, tmod, field);
+        UT_REQUIRE(Stripped(reduced) == ref_sq);
+
+        std::vector<Elem> out2;
+        trace_mod.trace(out2, param);
+        UT_REQUIRE(out2 == out);
+    }
+}
+
+/** Properties of the additive (Cantor-basis) FFT engine and its
+ *  multiplication tier. Engine checks run only for eligible fields (degree a
+ *  power of two, >= 16); other fields verify they are gated out. */
+template<typename F>
+void TestAdditiveFFT(const F& field, TestRand& rng, size_t iters) {
+    typedef typename F::Elem Elem;
+    const int bits = field.Bits();
+    const bool eligible_field = bits >= 16 && (bits & (bits - 1)) == 0;
+
+    // Gating: never below the product-length cutoff, never for non-power-of-2
+    // degrees, never with an unbalanced (short) operand.
+    UT_REQUIRE(!TraceModFFTEligible(field, 100, 100));
+    UT_REQUIRE(!TraceModFFTEligible(field, 1000, TRACEMOD_POLYMUL_CUTOFF));
+    UT_REQUIRE(TraceModFFTEligible(field, 400, 400) == eligible_field);
+    if (!eligible_field) return;
+
+    const int max_t = std::min(bits, 12);
+    AdditiveFFT<F> fft;
+    fft.Extend(field, max_t);
+
+    // Cantor basis: beta[0] == 1 and Sqr(beta[j]) ^ beta[j] == beta[j-1].
+    const auto& beta = fft.Basis();
+    UT_REQUIRE((int)beta.size() == max_t);
+    UT_REQUIRE(beta[0] == Elem(1));
+    for (size_t j = 1; j < beta.size(); ++j) {
+        UT_REQUIRE((field.Sqr(beta[j]) ^ beta[j]) == beta[j - 1]);
+    }
+
+    // Anchor property Z_{W_q}(beta[q]) == 1, with the vanishing polynomial
+    // evaluated independently (Lucas' theorem + repeated squaring), not via
+    // the engine's tables.
+    for (int q = 1; q < max_t; ++q) {
+        Elem acc = 0, pw = beta[q];
+        for (int j = 0; j <= q; ++j) {
+            if ((q & j) == j) acc ^= pw;
+            pw = field.Sqr(pw);
+        }
+        UT_REQUIRE(acc == Elem(1));
+    }
+
+    // Roundtrip at every dimension.
+    for (int m = 1; m <= max_t; ++m) {
+        std::vector<Elem> f(size_t(1) << m);
+        for (auto& e : f) e = RandElem(rng, field);
+        auto orig = f;
+        fft.FFT(f, m, field);
+        if (m > 1) UT_REQUIRE(f != orig); // Not the identity map (paranoia).
+        fft.IFFT(f, m, field);
+        UT_REQUIRE(f == orig);
+        fft.IFFT(f, m, field);
+        fft.FFT(f, m, field);
+        UT_REQUIRE(f == orig);
+    }
+
+    // Direct evaluation: FFT output j must equal the Horner evaluation at
+    // eta_j = XOR of beta[b] over the set bits b of j. This breaks the
+    // fft/ifft symmetry that roundtrip checks cannot see through.
+    for (int m = 1; m <= std::min(max_t, 6); ++m) {
+        size_t n_points = size_t(1) << m;
+        std::vector<Elem> f(n_points);
+        for (auto& e : f) e = RandElem(rng, field);
+        auto eval = f;
+        fft.FFT(eval, m, field);
+        for (size_t j = 0; j < n_points; ++j) {
+            Elem x = 0;
+            for (int b = 0; b < m; ++b) {
+                if ((j >> b) & 1) x ^= beta[b];
+            }
+            Elem horner = 0;
+            for (size_t i = f.size(); i > 0; --i) horner = field.Mul(horner, x) ^ f[i - 1];
+            UT_REQUIRE(eval[j] == horner);
+        }
+    }
+
+    // MulFull/MulLow against the schoolbook oracle, one engine across mixed
+    // sizes (exercises Extend growth and buffer reuse). Boundary product
+    // lengths around powers of two and around the cutoff, then random sizes.
+    std::vector<std::pair<size_t, size_t>> shapes;
+    for (size_t prod : {size_t{63}, size_t{64}, size_t{65}, size_t{127}, size_t{128}, size_t{129},
+                        TRACEMOD_FFT_CUTOFF - 1, TRACEMOD_FFT_CUTOFF, TRACEMOD_FFT_CUTOFF + 1}) {
+        size_t la = prod / 2 + 1, lb = prod - la + 1;
+        shapes.emplace_back(la, lb);
+    }
+    for (size_t i = 0; i < iters; ++i) {
+        shapes.emplace_back(1 + rng.RandRange(300), 1 + rng.RandRange(300));
+    }
+    for (const auto& shape : shapes) {
+        auto a = RandPoly(rng, field, shape.first);
+        auto b = RandPoly(rng, field, shape.second);
+        auto ref = PolyMulRef(a, b, field);
+        std::vector<Elem> full;
+        fft.MulFull(a, b, full, field);
+        UT_REQUIRE(full == ref);
+        size_t n = 1 + rng.RandRange(shape.first + shape.second + 8);
+        std::vector<Elem> low;
+        fft.MulLow(a, b, low, n, field);
+        UT_REQUIRE(low.size() == n);
+        auto ref_low = ref;
+        ref_low.resize(n, 0);
+        UT_REQUIRE(low == ref_low);
+    }
+
+    // Edge cases: empty operands, squaring shape (a == b).
+    std::vector<Elem> empty_in, out;
+    auto a = RandPoly(rng, field, 40);
+    fft.MulFull(a, empty_in, out, field);
+    UT_REQUIRE(out.empty());
+    fft.MulLow(empty_in, a, out, 7, field);
+    UT_REQUIRE(out == std::vector<Elem>(7, 0));
+    fft.MulFull(a, a, out, field);
+    UT_REQUIRE(out == PolyMulRef(a, a, field));
 }
 
 /* ---------- Syndrome and decode-stage properties ---------- */
@@ -503,6 +641,9 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestFieldOps(field, lowmod, rng, 4000);
     TestFieldSerialization(field, rng, 128);
     TestPolyOps(field, rng, 256, 12);
+    // Engine-level FFT diagnostics run before the reducer tests that use the
+    // FFT tier internally, so engine bugs are reported at their source.
+    TestAdditiveFFT(field, rng, 24);
     TestTraceModReducers(field, rng, 24);
     TestSyndromes(field, lowmod, rng, 128, 12);
     TestBerlekampMassey(field, rng, 128, 10);
