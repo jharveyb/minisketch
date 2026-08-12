@@ -393,15 +393,17 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
 }
 
 /** Properties of the subquadratic division and gcd (FastDivMod, FastGCD):
- *  equivalence with the schoolbook DivMod and the quadratic GCD at sizes
- *  crossing their cutoffs. Fields without the FFT tier delegate to the
- *  quadratic paths internally; they run the small sizes as a pass-through
- *  check. */
+ *  equivalence with the schoolbook DivMod and the quadratic GCD. A small
+ *  explicit cutoff is passed so the reciprocal and half-gcd machinery is
+ *  exercised with real recursion depth at reference-affordable degrees, on
+ *  every field (its correctness does not depend on the field); the
+ *  production cutoffs from FastDivModCutoff/FastGCDCutoff are far larger
+ *  and are exercised by the decode-level tests. */
 template<typename F>
 void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
     typedef typename F::Elem Elem;
-    const bool capable = TraceModFFTCapable(field);
-    const size_t maxdeg = capable ? 7 * HGCD_CUTOFF / 2 : 60;
+    const size_t maxdeg = 320;
+    const size_t cutoff = 24;
 
     for (size_t i = 0; i < iters; ++i) {
         // FastDivMod == DivMod (quotient and raw remainder buffer alike),
@@ -411,7 +413,7 @@ void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
         auto val = RandPoly(rng, field, dlen + rng.RandRange(maxdeg));
         std::vector<Elem> q_ref, rem_ref = val, q_fast, rem_fast = val;
         DivMod(mod, rem_ref, q_ref, field);
-        FastDivMod(mod, rem_fast, q_fast, field);
+        FastDivMod(mod, rem_fast, q_fast, field, cutoff);
         UT_REQUIRE(q_fast == q_ref);
         UT_REQUIRE(rem_fast == rem_ref);
 
@@ -419,7 +421,7 @@ void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
         auto exact = PolyMulRef(quot_in, mod, field);
         if (!exact.empty()) {
             std::vector<Elem> q2, rem2 = exact;
-            FastDivMod(mod, rem2, q2, field);
+            FastDivMod(mod, rem2, q2, field, cutoff);
             UT_REQUIRE(Stripped(rem2).empty());
             UT_REQUIRE(Stripped(q2) == Stripped(quot_in));
         }
@@ -432,7 +434,7 @@ void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
         auto b = PolyMulRef(h, g, field);
         auto a_ref = a, b_ref = b, a_fast = a, b_fast = b;
         GCD(a_ref, b_ref, field);
-        FastGCD(a_fast, b_fast, field);
+        FastGCD(a_fast, b_fast, field, cutoff);
         UT_REQUIRE(!a_ref.empty() && !a_fast.empty());
         MakeMonic(a_ref, field);
         MakeMonic(a_fast, field);
@@ -455,7 +457,7 @@ void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
         if (!r0.empty() && !r1.empty()) {
             auto na_ref = r0, nb_ref = r1, na_fast = r0, nb_fast = r1;
             GCD(na_ref, nb_ref, field);
-            FastGCD(na_fast, nb_fast, field);
+            FastGCD(na_fast, nb_fast, field, cutoff);
             UT_REQUIRE(!na_ref.empty() && !na_fast.empty());
             MakeMonic(na_ref, field);
             MakeMonic(na_fast, field);
@@ -465,25 +467,25 @@ void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
 
     // Edge cases: empty side, identical operands, one dividing the other,
     // and coprime pairs reducing to a constant.
-    auto a = RandPoly(rng, field, HGCD_CUTOFF + 20);
+    auto a = RandPoly(rng, field, 150);
     std::vector<Elem> empty_b;
     auto a_copy = a;
-    FastGCD(a_copy, empty_b, field);
+    FastGCD(a_copy, empty_b, field, cutoff);
     UT_REQUIRE(Stripped(a_copy) == Stripped(a));
 
     auto same1 = a, same2 = a;
-    FastGCD(same1, same2, field);
+    FastGCD(same1, same2, field, cutoff);
     auto want = a;
     UT_REQUIRE(!want.empty());
     MakeMonic(want, field);
     MakeMonic(same1, field);
     UT_REQUIRE(same1 == want);
 
-    auto factor = RandMonicPoly(rng, field, HGCD_CUTOFF + 10);
-    auto multiple = PolyMulRef(RandPoly(rng, field, HGCD_CUTOFF / 2), factor, field);
+    auto factor = RandMonicPoly(rng, field, 140);
+    auto multiple = PolyMulRef(RandPoly(rng, field, 60), factor, field);
     if (!multiple.empty()) {
         auto ma = multiple, mb = factor;
-        FastGCD(ma, mb, field);
+        FastGCD(ma, mb, field, cutoff);
         UT_REQUIRE(!ma.empty());
         MakeMonic(ma, field);
         UT_REQUIRE(ma == factor);
