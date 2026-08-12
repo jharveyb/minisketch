@@ -181,21 +181,128 @@ The speedup grows with capacity, as the FFT's `M(d) ≈ 3d·log d` pulls away
 from Karatsuba's `d^1.585`; the remaining quadratic terms (GCD, division,
 Berlekamp-Massey — see below) now bound the curve. Benchmark hygiene note:
 these runs must be taken on an otherwise-idle machine — concurrent IDE
-indexing was observed to inflate short rows by ~2.5×.
+indexing was observed to inflate short rows by ~2.5×, and sub-millisecond
+rows show bimodal scheduling jitter that only warm min-of-many runs see
+through.
+
+### Cached node transforms ("Phase 2")
+
+Each `ReciprocalReduce` multiplies by the same two per-node-constant
+operands: the reversed-modulus inverse series (`inv`) and the modulus
+itself (`mod`). Their transforms are prepared once per `TraceMod` node at
+a fixed size 2<sup>fft_m</sup> ≥ 2·deg(mod) — which fits every product in
+a reduction — and reused through a prepared-operand engine entry point
+(`AdditiveFFT::Prepare` / `MulLowPrepared`): a full-size reduction then
+costs **4 transforms instead of 6**. The prepared path engages exactly
+when the dynamic path would run the FFT at the node size anyway
+(`CachedMulEligible`), so the short-value early rounds of a trace keep
+their cheaper half-size-FFT/Karatsuba handling, and the two one-time
+`Prepare` transforms amortize over the ~2·(Bits−1) reductions of a node.
+
+Measured on top of the FFT tier (3-way interleaved base/FFT/cached, same
+protocol; 100% error rows):
+
+| syndromes/errors | 64-bit CLMUL | 64-bit generic | 32-bit CLMUL |
+|---|---|---|---|
+| 500/500   | 13.81 → 12.34 ms (1.12×) | parity (square-table mode) | 1.09× |
+| 1024/1024 | 42.35 → 36.91 ms (1.15×) | 1.25× | 1.13× |
+| 2048/2048 | 122.89 → 100.58 ms (1.22×) | 1.23× | 1.11× |
+| 4096/4096 | 342.48 → 286.80 ms (1.19×) | 1.19× | 1.14× |
+
+Cumulatively vs the pre-FFT baseline (64-bit CLMUL): 1.58× at 500/500,
+1.87× at 1024/1024, 2.26× at 2048/2048, **2.67× at 4096/4096**.
+
+A deeper restructuring that keeps the trace value in the *evaluation
+domain* (squaring is pointwise there: `f²(p) = f(p)²` in char 2) was
+analyzed and found to be a wash: the quotient needed for reduction must be
+built from the *reversed* high coefficients of the squared value, and
+reversal is not representable in the evaluation domain, so each round
+still needs the same 4 transforms (IFFT of the squared evaluations, FFT of
+the reversed value, IFFT of the quotient series, FFT of the quotient) —
+the only saving is the already-cheap coefficient-wise squaring pass.
+Recorded here so it is not re-derived.
+
+### Decode cost at partial error counts
+
+Decode cost tracks the *actual* number of differences `e`, not the
+capacity: Berlekamp-Massey is adaptive O(e·n), and the locator degree —
+which drives the whole root-finding stage and hence the FFT tier — equals
+`e`. Measured with errors at a fraction of the syndrome count (64-bit
+CLMUL, same 3-way protocol; base → FFT → cached, speedup = base/cached):
+
+| syndromes | errors | base (ms) | +FFT | +cached | speedup |
+|---|---|---|---|---|---|
+| 4096 | 4096 (100%) | 765.16 | 342.48 | 286.80 | 2.67× |
+| 4096 | 3072 (75%)  | 483.77 | 228.09 | 190.84 | 2.53× |
+| 4096 | 2048 (50%)  | 239.19 | 133.87 | 112.28 | 2.13× |
+| 4096 | 1024 (25%)  | 77.23  | 52.34  | 45.42  | 1.70× |
+| 4096 | 410 (10%)   | 16.96  | 14.73  | 13.69  | 1.24× |
+| 2048 | 2048 (100%) | 226.81 | 122.89 | 100.58 | 2.26× |
+| 2048 | 1536 (75%)  | 143.07 | 82.59  | 68.92  | 2.08× |
+| 2048 | 1024 (50%)  | 71.82  | 47.71  | 38.41  | 1.87× |
+| 2048 | 512 (25%)   | 21.81  | 15.81  | 13.80  | 1.58× |
+| 2048 | 204 (10%)   | 4.46   | 4.45   | 4.41   | parity |
+| 1024 | 1024 (100%) | 69.12  | 42.35  | 36.91  | 1.87× |
+| 1024 | 768 (75%)   | 42.29  | 29.69  | 25.39  | 1.67× |
+| 1024 | 512 (50%)   | 20.52  | 15.05  | 12.38  | 1.66× |
+| 1024 | 256 (25%)   | 5.87   | 5.20   | 4.69   | 1.25× |
+| 1024 | 102 (10%)   | 1.14   | 1.15   | 1.15   | parity |
+| 500  | 500 (100%)  | 19.47  | 13.81  | 12.34  | 1.58× |
+| 500  | 375 (75%)   | 11.29  | 9.87   | 8.77   | 1.29× |
+| 500  | ≤250 (≤50%) | —      | —      | —      | parity |
+
+The speedup is a function of `e` with mild dilution from the O(e·n) BM
+term as `n` grows (e.g. e = 1024: 1.87× at n = 1024/2048, 1.70× at
+n = 4096); below the reciprocal-reducer crossover (deg < 256 on CLMUL
+fields) the FFT tier never engages and every configuration is at parity —
+no regression anywhere, in either field implementation. The e = 256 row
+engaging (1.25×) while e = 250 does not is the table cutoff, working as
+intended.
 
 Remaining follow-ups on this tier:
 
-* **Cached node transforms ("Phase 2")**: `inv` and `mod` are fixed per
-  TraceMod node, so their transforms can be computed once and reused across
-  all `Bits−1` reductions, cutting each reduction from 6 transforms to 4
-  (bounded ~33% of the FFT time; needs a pretransformed-operand entry point
-  and a fixed per-node transform size). Additionally, in the evaluation
-  domain squaring is pointwise (`f²(p) = f(p)²` in char 2), which a deeper
-  restructuring of the trace loop could exploit.
 * **General-basis Gao-Mateer** for non-power-of-two fields.
+* **Coset-shifted truncated multiplication** to soften the power-of-two
+  padding cliff: for product length 2<sup>t</sup> + c (c small) the engine
+  currently pads to 2<sup>t+1</sup>, doubling transform cost. The CRT
+  trick of Chen et al. (SFAFFT, §4.2) computes `fg mod q` with a
+  size-2<sup>t</sup> transform — wraparound *is* reduction modulo the
+  vanishing polynomial of the evaluation set — plus `fg mod x^c` with a
+  small Karatsuba product, and recombines; the recombination divides by
+  the sparse vanishing polynomial, nearly free XOR. Caveat: it needs
+  gcd(Z, x<sup>c</sup>) = 1, and the θ=0 subspace contains 0 (Z has zero
+  constant term), so this requires a coset-shifted transform (evaluate on
+  β<sub>t</sub> + W<sub>t</sub>; twiddles gain a per-round offset). Payoff
+  is up to ~2× on transform cost right above each power of two, shrinking
+  to nothing at the next one.
 * The **Frobenius additive FFT** (Li et al., ISSAC 2018) does *not* apply:
   its factor-d truncation requires coefficients in GF(2), while the
   decoder's are full field elements.
+
+### Strided Frobenius additive FFT (2026): assessed, core inapplicable
+
+Chen et al., *Strided Frobenius Additive FFT and its Application to HQC*
+(2026; `doc/2026-1588_strided_frobenius.pdf`) reframes additive FFTs
+ring-theoretically and adds two generalizations: *strided* transforms
+(treat x<sup>k</sup> as the variable; stop log₂k butterfly rounds early
+and do the pointwise step as length-k polynomial products) and
+*incomplete* transforms (its Theorem 1 formalizes that multiplication only
+needs the quotient-algebra degree to exceed the product degree — the same
+fact `MulFull`'s wraparound tripwire relies on). Assessment:
+
+* The **Frobenius core does not transfer**, for the same reason as the
+  ISSAC 2018 paper: evaluation on orbit representatives needs GF(2)
+  coefficients so that f(σ²) = f(σ)².
+* **Striding is field-agnostic but near-neutral here**: every round of our
+  transform costs N/2 twiddle-macs regardless of depth, so truncating
+  log₂k rounds saves (3/2)·N·log₂k multiplications across a product's
+  three transforms while the pointwise step grows from N to
+  (N/k)·(M(k)+k−1) — net ~0.5N saved at k=2, ~2N at k=4, i.e. 3–6% of FFT
+  multiplications. The paper's headline wins (butterflies dropping into a
+  smaller field, byte-aligned basis conversion, sparse CRT moduli) are
+  specific to the F₂[x]/HQC setting.
+* The **CRT-with-x^c truncation** (§4.2) is the one transferable idea —
+  recorded as the coset-shifted follow-up above.
 
 References:
 
@@ -206,78 +313,87 @@ References:
 * Li, Chen, Kuo, Cheng, Yang, *Frobenius Additive Fast Fourier Transform*
   (ISSAC 2018; `doc/3208976.3208998_frobenius_additive_fft.pdf`,
   <https://arxiv.org/abs/1802.03932>) — Cantor-construction cross-check.
+* Chen, Chien, Chiu, Huang, Lin, Peng, Yang, *Strided Frobenius Additive
+  FFT and its Application to HQC* (2026;
+  `doc/2026-1588_strided_frobenius.pdf`) — assessed above; source of the
+  CRT-truncation follow-up.
 * Gao, Mateer, *Additive Fast Fourier Transforms over Finite Fields*
   (<https://www.math.clemson.edu/~sgao/papers/GM10.pdf>) — the general-basis
   construction for the non-power-of-two follow-up.
 * Bernstein, *Multiplication of polynomials over F₂* survey
   (<https://cr.yp.to/f2mult.html>)
 
-## Deferred: safegcd (Bernstein-Yang divstep) for Berlekamp-Massey
+## Next: subquadratic GCD (roadmap)
 
-The safegcd paper (Bernstein-Yang 2019, eprint 2019/266) is half about
-polynomials: its §3–7 define the `divstep` iteration for `k[[x]]` over an
-arbitrary field k — GF(2<sup>m</sup>) applies directly — and the paper itself
-notes that **Berlekamp-Massey is a special case of a Euclid/half-gcd
-computation** with reversed coefficients (with one input a power of x). So a
-divstep-based BM is well-defined and would slot into `BerlekampMassey`'s
-place, with the error locator falling out of the accumulated 2×2 transition
-matrix.
+With the FFT tier and cached transforms in place, the quadratic GCD is the
+next structural bottleneck: `GCD(trace, poly)` runs once per split attempt
+at every `RecFindRoots` node (~d² multiplications at degree d, ~2d² summed
+over the recursion — at capacity 4096 already comparable to the whole
+FFT-accelerated trace stage), plus one quadratic `DivMod` per successful
+split. Berlekamp-Massey stays adaptive O(e·n) and only matters when e ≈ n.
 
-Why it is deferred — the arithmetic at minisketch sizes goes the wrong way:
+Algorithm choice (literature review, mid-2026):
 
-* Plain `divstepsx` is Θ(steps × length) = Θ(c²) for capacity c: it always
-  processes full-length inputs. The current BM is adaptive Θ(c·n) (n =
-  actual LFSR length), which is *better* whenever n ≪ c — the common case.
-  A straight port would be a 2–8× regression.
-* The subquadratic variant `jumpdivstepsx` (§5.3) is elegant — unlike
-  classical HGCD it needs **no polynomial division subroutine at all**, just
-  2×2 matrix products of half precision — but its constants are HGCD-class.
-  With Karatsuba-only `M(d)` its crossover against schoolbook sat around
-  degree 10⁴; with the implemented additive-FFT `M(d)` the break-even
-  estimate drops to a few thousand — at the edge of real sketch sizes.
-  Relevant because the FFT changed the cost balance: at capacity 4096 the
-  per-node quadratic GCD is now comparable to the whole FFT-accelerated
-  trace computation of the top node, so subquadratic GCD/BM is the next
-  structural bottleneck for large-capacity decode.
+* **Classic recursive HGCD, gcd-only — not jumpdivstep.** The
+  root-splitting step needs only the gcd itself, not Bezout coefficients,
+  which drops the cofactor reconstruction. van der Hoeven, *Optimizing the
+  half-gcd algorithm* (arXiv:2212.12389) gives ~5.5·M(d)·log₂d in the FFT
+  model for *normal* remainder sequences — the expected case over
+  GF(2<sup>m</sup>), where sequences are normal with probability
+  1 − O(d/2<sup>m</sup>) — via middle products and transform caching
+  across the 2×2-matrix recursion. Both tricks fit the additive FFT; the
+  `Prepare`/`MulLowPrepared` entry point is the needed hook. (An earlier
+  note here claimed the paper's FFT-model constants were "not reachable in
+  characteristic 2" — true before the additive-FFT tier existed, obsolete
+  now.)
+* Polynomial **divstep** (safegcd §3–7, eprint 2019/266) processes exactly
+  2d−1 steps, cannot exploit degree drops, and lands ~2× behind optimized
+  HGCD in the same multiplication model; its constant-time regularity is
+  irrelevant to decode (the decoder is variable-time by design, and BM is
+  a Euclid special case per the paper — see below). The one measured
+  jumpdivstep implementation (Jian-Wang-Yang-Chen, eprint 2024/644, NTRU
+  Prime inversion) crosses over against *quadratic divstep* at degree
+  ~653 and confirms transform caching as the main practical lever. Keep
+  divstep in reserve only for a hypothetical constant-time decoder (no
+  published divstep-over-GF(2<sup>m</sup>)[x] implementation appears to
+  exist), along with libsecp256k1's batched transition-matrix trick
+  (`doc/safegcd_implementation.md`) as a memory-traffic optimization.
+* **Crossover evidence**: NTL's `GF2EX` (the same coefficient-ring shape)
+  switches Euclid→HGCD around degree 40 with recursion base 40; FLINT's
+  `nmod_poly` at ~340 over cheaper word-size prime fields. Expect ours in
+  the 100–500 range; sweep it.
+* **Honest ceiling**: at d = 4096, ~5.5·M(d)·log₂d ≈ 11M multiplications
+  (M(4096) ≈ 168k with the FFT tier) vs ~16.7M quadratic — ~1.5× on the
+  gcd itself by the naive constant, growing with capacity and with the
+  constant-factor tricks; the structural point is that decode stops being
+  quadratic overall.
+* **Fast BM** via the Dornstetter/key-equation equivalence (one partial
+  XGCD at degree 2t; modern formulation: PM-Basis minimal approximants,
+  practical in Neiger's PML library at degrees 10³–10⁵) only wins when
+  e ≈ n, since the current BM is adaptive O(e·n): the pragmatic hybrid
+  keeps adaptive BM and restarts with the HGCD key-equation solver when
+  the LFSR length crosses a tuned threshold. Strictly after the gcd work.
 
-What *is* worth taking from safegcd today:
+Implementation order (branch `subquadratic-gcd`):
 
-* The **batched transition matrix** trick from libsecp256k1's implementation
-  (`doc/safegcd_implementation.md`): N divsteps depend only on the bottom N
-  coefficients, so one can compute an N-step 2×2 matrix from a prefix and
-  apply it to the full-length polynomials in one pass — a constant-factor
-  memory-traffic optimization that does not need subquadratic multiplication.
-* Divstep's data-independent control flow is the natural shape for a
-  **constant-time decoder**, should side-channel-uniform decoding ever become
-  a requirement (the current decoder is variable-time and instead randomizes
-  the trace basis per sketch). No published divstep-over-GF(2<sup>m</sup>)[x]
-  implementation appears to exist, so this would be new work.
+1. Subquadratic `DivMod` after each successful split, using the existing
+   reciprocal machinery (`TraceModInvSeries` + two `MulLow`s) — the same
+   algorithm `ReciprocalReduce` already uses, as a one-shot division with
+   quotient output. Small, low-risk, immediately measurable.
+2. Recursive gcd-only HGCD over `TraceModPolyMulFull` with a swept
+   degree-cutoff fallback to the quadratic loop; van der Hoeven
+   middle-product and transform-caching constants. Tests per `testing.md`:
+   property tests against the quadratic GCD reference, a poly_ops fuzz
+   mirror, planted mutations. Acceptance: no regression at any capacity,
+   measured win at 2048+.
+3. Hybrid fast-BM key-equation solver, gated on measured e ≈ n profiles.
 
-References: <https://eprint.iacr.org/2019/266>,
+References: <https://arxiv.org/abs/2212.12389>,
+<https://eprint.iacr.org/2019/266>, <https://eprint.iacr.org/2024/644>,
+NTL `GF2EX` HalfGCD (<https://github.com/libntl/ntl>),
+<https://github.com/vneiger/pml>,
 <https://github.com/bitcoin-core/secp256k1/blob/master/doc/safegcd_implementation.md>,
-iteration bounds <https://github.com/sipa/safegcd-bounds>.
-
-## Deferred: Half-GCD
-
-The README's remaining TODO. Classical Knuth-Schönhage-Moenck HGCD computes
-polynomial GCDs in `O(M(d) log d)`; the best published constants (van der
-Hoeven, *Optimizing the half-gcd algorithm*, 2022) are ~10–22·`M(d)`·log₂d
-depending on normality of the remainder sequence, and the favorable "FFT
-model" constants in that paper are not reachable in characteristic 2. Two
-independent reasons to defer:
-
-* With Karatsuba `M(d)`, break-even against the current quadratic GCD is
-  around degree 3×10⁴ — an order of magnitude above the largest practical
-  sketch capacities.
-* Before the additive FFT, GCD was not even the bottleneck: ~1/m of a node's
-  trace computation. The FFT changed this — at capacity 4096 the quadratic
-  GCD is now comparable to the top node's whole trace stage — so a
-  subquadratic GCD is the next structural lever for large capacities.
-
-With the additive FFT in place, `jumpdivstepsx` above is likely the
-better-shaped candidate for this role (no division subroutine; uniform
-structure); the break-even remains to be measured, estimated at a few
-thousand syndromes.
+<https://github.com/sipa/safegcd-bounds>.
 
 ## Demoted ideas (investigated, not worth it)
 
