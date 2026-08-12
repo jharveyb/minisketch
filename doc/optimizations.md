@@ -124,69 +124,91 @@ reusable across all small-degree nodes, or field sizes small enough that the
 m×m solve is trivial — neither applies to the 32/64-bit fields that matter
 here.
 
-## Deferred: additive FFTs, the long-term multiplication unlock
+## Implemented: the additive-FFT multiplication tier
 
-Everything below is bottlenecked on one quantity: `M(d)`, the cost of
-multiplying two degree-`d` polynomials with coefficients in GF(2<sup>m</sup>).
-The reducer currently uses Karatsuba (`TraceModPolyMulLow/Full`), giving
-`M(d) ≈ d^1.585`. The classical route to `M(d) = O(d log d)` — evaluation /
-interpolation at 2<sup>t</sup>-th roots of unity — **does not exist in
-characteristic 2**: the multiplicative group of GF(2<sup>m</sup>) has odd
-order, so there are no useful power-of-two roots of unity.
+The bottleneck quantity for everything below is `M(d)`, the cost of
+multiplying degree-`d` polynomials with coefficients in GF(2<sup>m</sup>).
+The classical `O(d log d)` route — roots of unity — does not exist in
+characteristic 2 (the multiplicative group has odd order); the
+characteristic-2 answer is the **additive FFT**, which evaluates over a
+GF(2)-linear subspace instead of a multiplicative subgroup.
 
-The characteristic-2 answer is the **additive FFT** (Cantor 1989; Gao-Mateer
-2010): instead of evaluating at a multiplicative subgroup, evaluate at a
-GF(2)-linear *subspace* W ⊂ GF(2<sup>m</sup>). The divide-and-conquer step
-uses subspace polynomials (whose roots are a subspace) rather than
-`x^N − 1`: `s(x) = Π_{w∈W₀}(x − w)` is GF(2)-linearized, so
-`f mod (s(x) − s(β))` recursions split the evaluation set into cosets of
-W₀ exactly like the multiplicative FFT splits into even/odd. Gao-Mateer
-achieve ~½·N·log N multiplications and ~¼·N·log N·log log N additions for an
-N-point transform (N = 2<sup>t</sup> points), giving
-`M(d) = O(d log d log log d)` overall.
+`src/additive_fft.h` implements the **Cantor-basis additive FFT** ("Cantor
+algorithm", after Cantor 1989, in the presentation of Badakhshan-Samanta-
+Gong, SAC 2025): the transform is `t` rounds of division by vanishing
+polynomials Z<sub>W<sub>i</sub></sub>(x) = S<sup>i</sup>(x), S(x) = x²+x,
+whose coefficients in the Cantor special basis are in GF(2) and *sparse*
+(2<sup>wt(i)</sup> terms, by Lucas' theorem) — so divisions are pure XOR and
+the only field multiplications are one twiddle multiply-accumulate per
+high-half position: ½·N·log₂N per transform. The basis is built with the
+existing `Qrt` field operation (β₀ = 1, β<sub>j</sub> = Qrt(β<sub>j−1</sub>);
+the chain provably cannot fail in fields of power-of-two degree), and with
+evaluation shift 0 the per-block twiddles collapse to one round-independent
+array of basis-element XORs. `TraceModPolyMulLow/Full` dispatch to the
+engine (owned by `TraceModScratch`, so tables amortize over a node's
+2·(Bits−1) reductions) when `TraceModFFTEligible`; `ReciprocalReduce`, the
+Newton inverse, and `SquareAndReduce` accelerate transparently.
 
-Why this fits minisketch unusually well:
+Scope and tuned constants:
 
-* The coefficient fields are already binary fields GF(2<sup>m</sup>),
-  m = 2..64 — no embedding tricks needed. Evaluation points come from any
-  GF(2)-subspace of the field; capacities (≤ a few thousand) need subspaces
-  of dimension ~13, available for every m ≥ 13 (smaller fields don't reach
-  degrees where this matters anyway).
-* The decoder's inner loop is *repeated reduction by a fixed modulus*
-  (`TraceMod::trace`: `Bits-1` reductions per node, plus the
-  non-factorizability test). With an FFT-grade `M(d)`, the reciprocal-reduce
-  path (`ReciprocalReduce` = 2 low-products) drops from Karatsuba cost to
-  ~`O(d log d)` per reduction, and one can additionally cache the *transform*
-  of the fixed modulus and of the precomputed Newton inverse across all
-  `Bits-1` reductions — an extra constant-factor win unavailable to plain
-  multiplication.
+* The Cantor special basis requires field degree 2<sup>ℓ</sup> — the tier
+  covers the 16/32/64-bit fields (both implementations). Other fields keep
+  Karatsuba; extending to them needs the general-basis Gao-Mateer
+  construction (future work — notably the committed worst-case slow-units
+  use 54/56/62-bit fields and are untouched by this tier).
+* `TRACEMOD_FFT_CUTOFF = 128` (product length; response is nearly flat in
+  64..512, so this is not a sensitive knob).
+* The square-table/reciprocal crossover halves to
+  `TRACEMOD_FFT_TABLE_CUTOFF = 256` — but **only for field implementations
+  whose scalar `Multiplier` is a plain wrapper** (the CLMUL fields). The
+  generic fields pay a Multiplier table build per FFT block, which keeps
+  their crossover at 512; giving them the lower cutoff measurably regressed
+  500-1024-syndrome decodes by ~10-25%. `TraceModTableCutoff` distinguishes
+  the two by the Multiplier size.
 
-Integration sketch (all contained in `src/sketch_impl.h`):
+Measured decode time (interleaved A/B vs the pre-FFT branch point,
+best-of-iters, min of 3 invocations, otherwise-idle machine):
 
-1. Implement forward/inverse additive DFT over a dimension-`t` subspace
-   (Gao-Mateer recursion over subspace polynomials; the Cantor special basis
-   applies when m is a power of 2 — for other m, the general Gao-Mateer
-   construction works from any basis).
-2. Add an FFT-based `TraceModPolyMulLow/Full` tier above a new cutoff
-   (`TRACEMOD_FFT_CUTOFF`), leaving Karatsuba for mid sizes and schoolbook
-   for small ones, exactly parallel to the existing
-   `TRACEMOD_POLYMUL_CUTOFF` tiering.
-3. Re-tune `TRACEMOD_TABLE_CUTOFF` (the square-table/reciprocal crossover)
-   afterwards — a cheaper reciprocal path pushes it down.
+| syndromes/errors | 64-bit CLMUL | 64-bit generic | 32-bit CLMUL |
+|---|---|---|---|
+| 150/150   | 1.92 ms (parity) | parity | parity |
+| 500/500   | 19.57 → 13.96 ms (1.40×) | parity | 1.36× |
+| 1024/1024 | 68.66 → 44.01 ms (1.56×) | 1.16× | 1.50× |
+| 2048/2048 | 228.90 → 119.94 ms (1.91×) | 1.24× | 1.68× |
+| 4096/4096 | 763.16 → 337.93 ms (2.26×) | 1.45× | 1.84× |
 
-Expected effect, roughly: at d = 1024, Karatsuba costs ~3⁵·1024 ≈ 250k
-multiplications vs ~d·log₂d ≈ 10k·(constant) for the additive FFT — a
-several-fold reduction of the dominant term, growing with capacity. It also
-**re-opens the two deferred algorithms below**, whose crossover points are
-currently far above practical sketch sizes precisely because they pay
-`M(d) log d`.
+The speedup grows with capacity, as the FFT's `M(d) ≈ 3d·log d` pulls away
+from Karatsuba's `d^1.585`; the remaining quadratic terms (GCD, division,
+Berlekamp-Massey — see below) now bound the curve. Benchmark hygiene note:
+these runs must be taken on an otherwise-idle machine — concurrent IDE
+indexing was observed to inflate short rows by ~2.5×.
+
+Remaining follow-ups on this tier:
+
+* **Cached node transforms ("Phase 2")**: `inv` and `mod` are fixed per
+  TraceMod node, so their transforms can be computed once and reused across
+  all `Bits−1` reductions, cutting each reduction from 6 transforms to 4
+  (bounded ~33% of the FFT time; needs a pretransformed-operand entry point
+  and a fixed per-node transform size). Additionally, in the evaluation
+  domain squaring is pointwise (`f²(p) = f(p)²` in char 2), which a deeper
+  restructuring of the trace loop could exploit.
+* **General-basis Gao-Mateer** for non-power-of-two fields.
+* The **Frobenius additive FFT** (Li et al., ISSAC 2018) does *not* apply:
+  its factor-d truncation requires coefficients in GF(2), while the
+  decoder's are full field elements.
 
 References:
 
+* Badakhshan, Samanta, Gong, *Accelerating Post-quantum Secure zkSNARKs by
+  Optimizing Additive FFT* (SAC 2025;
+  `doc/sac2025-2-paper17_optimizing_additive_fft.pdf`) — primary source for
+  the implemented algorithm.
+* Li, Chen, Kuo, Cheng, Yang, *Frobenius Additive Fast Fourier Transform*
+  (ISSAC 2018; `doc/3208976.3208998_frobenius_additive_fft.pdf`,
+  <https://arxiv.org/abs/1802.03932>) — Cantor-construction cross-check.
 * Gao, Mateer, *Additive Fast Fourier Transforms over Finite Fields*
-  (<https://www.math.clemson.edu/~sgao/papers/GM10.pdf>)
-* Li, Chou et al., *Frobenius Additive FFT* (<https://arxiv.org/abs/1802.03932>)
-* Working C++ implementations: <https://github.com/kunzjacq/Additive_DFTs>
+  (<https://www.math.clemson.edu/~sgao/papers/GM10.pdf>) — the general-basis
+  construction for the non-power-of-two follow-up.
 * Bernstein, *Multiplication of polynomials over F₂* survey
   (<https://cr.yp.to/f2mult.html>)
 
@@ -209,10 +231,14 @@ Why it is deferred — the arithmetic at minisketch sizes goes the wrong way:
   A straight port would be a 2–8× regression.
 * The subquadratic variant `jumpdivstepsx` (§5.3) is elegant — unlike
   classical HGCD it needs **no polynomial division subroutine at all**, just
-  2×2 matrix products of half precision — but its constants are HGCD-class,
-  so with Karatsuba-only `M(d)` its crossover against schoolbook BM sits
-  around degree 10⁴ and above: far beyond real sketches. With an additive
-  FFT in place (previous section) this calculus changes.
+  2×2 matrix products of half precision — but its constants are HGCD-class.
+  With Karatsuba-only `M(d)` its crossover against schoolbook sat around
+  degree 10⁴; with the implemented additive-FFT `M(d)` the break-even
+  estimate drops to a few thousand — at the edge of real sketch sizes.
+  Relevant because the FFT changed the cost balance: at capacity 4096 the
+  per-node quadratic GCD is now comparable to the whole FFT-accelerated
+  trace computation of the top node, so subquadratic GCD/BM is the next
+  structural bottleneck for large-capacity decode.
 
 What *is* worth taking from safegcd today:
 
@@ -243,11 +269,15 @@ independent reasons to defer:
 * With Karatsuba `M(d)`, break-even against the current quadratic GCD is
   around degree 3×10⁴ — an order of magnitude above the largest practical
   sketch capacities.
-* GCD is not even the bottleneck: at a `RecFindRoots` node it costs ~1/m of
-  the trace computation. Even a free GCD caps out well below a 2× node win.
+* Before the additive FFT, GCD was not even the bottleneck: ~1/m of a node's
+  trace computation. The FFT changed this — at capacity 4096 the quadratic
+  GCD is now comparable to the top node's whole trace stage — so a
+  subquadratic GCD is the next structural lever for large capacities.
 
-Revisit only after an additive FFT lands (and then `jumpdivstepsx` above is
-likely the better-shaped candidate for the same role).
+With the additive FFT in place, `jumpdivstepsx` above is likely the
+better-shaped candidate for this role (no division subroutine; uniform
+structure); the break-even remains to be measured, estimated at a few
+thousand syndromes.
 
 ## Demoted ideas (investigated, not worth it)
 
