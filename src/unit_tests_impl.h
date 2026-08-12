@@ -364,6 +364,32 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
         trace_mod.trace(out2, param);
         UT_REQUIRE(out2 == out);
     }
+
+    // The cached-transform (prepared-operand) reducer path. At the degree
+    // just past the table cutoff above, the fixed node transform is twice
+    // the dynamically chosen size and the cached path correctly stays off;
+    // at 5/4 of the cutoff the full-size reductions land in the upper half
+    // of the padded transform and the prepared operands engage.
+    if (field.Bits() == 32) {
+        auto tmod = RandMonicPoly(rng, field, 5 * TRACEMOD_FFT_TABLE_CUTOFF / 4);
+        Elem param = RandNonzeroElem(rng, field);
+        TraceMod<F> trace_mod(tmod, field);
+        std::vector<Elem> out;
+        trace_mod.trace(out, param);
+        UT_REQUIRE(Stripped(out) == TraceModRefImpl(tmod, param, field));
+
+        // Full-length SquareAndReduce so both prepared products engage.
+        auto val = RandPoly(rng, field, tmod.size() - 1);
+        auto reduced = val;
+        trace_mod.SquareAndReduce(reduced);
+        auto ref_sq = PolyMulRef(val, val, field);
+        PolyReduceRef(ref_sq, tmod, field);
+        UT_REQUIRE(Stripped(reduced) == ref_sq);
+
+        std::vector<Elem> out2;
+        trace_mod.trace(out2, param);
+        UT_REQUIRE(out2 == out);
+    }
 }
 
 /** Properties of the additive (Cantor-basis) FFT engine and its
@@ -478,6 +504,30 @@ void TestAdditiveFFT(const F& field, TestRand& rng, size_t iters) {
     UT_REQUIRE(out == std::vector<Elem>(7, 0));
     fft.MulFull(a, a, out, field);
     UT_REQUIRE(out == PolyMulRef(a, a, field));
+
+    // Prepared-operand multiplication: Prepare + MulLowPrepared must match
+    // MulLow for every truncation length, both at the minimal transform size
+    // and at one above it (the oversized case mirrors TraceMod's fixed
+    // per-node size), reusing one prepared table across several multiplicands.
+    for (size_t i = 0; i < iters; ++i) {
+        auto b = RandPoly(rng, field, 1 + rng.RandRange(200));
+        size_t max_la = 1 + rng.RandRange(200);
+        size_t max_prod = max_la + b.size() - 1;
+        int m_min = 1;
+        while ((size_t(1) << m_min) < max_prod) ++m_min;
+        for (int m = m_min; m <= std::min(m_min + 1, max_t); ++m) {
+            std::vector<Elem> b_fft;
+            fft.Prepare(b, m, field, b_fft);
+            for (int j = 0; j < 3; ++j) {
+                auto a2 = RandPoly(rng, field, 1 + rng.RandRange(max_la));
+                size_t n = 1 + rng.RandRange(a2.size() + b.size() + 8);
+                std::vector<Elem> low, low_ref;
+                fft.MulLowPrepared(a2, b_fft, b.size(), m, low, n, field);
+                fft.MulLow(a2, b, low_ref, n, field);
+                UT_REQUIRE(low == low_ref);
+            }
+        }
+    }
 }
 
 /* ---------- Syndrome and decode-stage properties ---------- */
