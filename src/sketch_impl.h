@@ -13,6 +13,7 @@
 #include "util.h"
 #include "sketch.h"
 #include "int_utils.h"
+#include "additive_fft.h"
 
 /* Algorithm crossover cutoffs. Each can be overridden at build time with
  * -DMINISKETCH_<NAME>=<value> (e.g. for cross-machine tuning via
@@ -151,15 +152,38 @@ void PolyMulLowNaive(const std::vector<typename F::Elem>& a, const std::vector<t
     }
 }
 
+/** Whether the additive-FFT multiplication tier applies to a product of
+ * (truncated) operand lengths la and lb: the field degree must be a power of
+ * two of at least 16 (the Cantor special basis requirement; smaller fields
+ * never reach the cutoff), the product must be balanced enough and long
+ * enough, and 2^t >= la + lb - 1 evaluation points must exist with
+ * t <= field.Bits() (a real constraint only for the 16-bit field; the
+ * fallback is Karatsuba, whose recursive halves may re-enter this tier). */
+template<typename F>
+bool TraceModFFTEligible(const F& field, size_t la, size_t lb) {
+    int bits = field.Bits();
+    if (bits < 16 || (bits & (bits - 1)) != 0) return false;
+    if (la == 0 || lb == 0) return false;
+    if (std::min(la, lb) <= TRACEMOD_POLYMUL_CUTOFF) return false;
+    size_t prod = la + lb - 1;
+    if (prod < TRACEMOD_FFT_CUTOFF) return false;
+    int t = 1;
+    while ((size_t(1) << t) < prod && t < 64) ++t;
+    return t <= bits;
+}
+
 /** Reusable scratch buffers for the TraceMod polynomial multiplications below.
  * Slot (level, idx) is dedicated to one temporary of one recursion level, so a
  * callee never touches its caller's buffers, and buffer capacity persists
  * across calls. A deque keeps references to existing slots valid while deeper
- * recursion levels append new ones. */
+ * recursion levels append new ones. Also owns the additive-FFT engine, whose
+ * basis/twiddle tables amortize over all multiplications sharing the scratch
+ * (one TraceMod node performs 2*(Bits-1) reductions with it). */
 template<typename F>
 struct TraceModScratch {
     static const size_t SLOTS = 9;
     std::deque<std::vector<typename F::Elem>> slots;
+    AdditiveFFT<F> fft;
     std::vector<typename F::Elem>& Get(size_t level, size_t idx) {
         CHECK_SAFE(idx < SLOTS);
         size_t i = level * SLOTS + idx;
@@ -183,6 +207,10 @@ void TraceModPolyMulLow(const std::vector<typename F::Elem>& a, const std::vecto
     typedef typename F::Elem Elem;
     if (n == 0 || a.empty() || b.empty()) {
         out.assign(n, 0);
+        return;
+    }
+    if (TraceModFFTEligible(field, std::min(a.size(), n), std::min(b.size(), n))) {
+        scratch.fft.MulLow(a, b, out, n, field);
         return;
     }
     if (n <= TRACEMOD_POLYMUL_CUTOFF || std::min(a.size(), b.size()) <= TRACEMOD_POLYMUL_CUTOFF) {
@@ -258,6 +286,10 @@ void TraceModPolyMulFull(const std::vector<typename F::Elem>& a, const std::vect
     typedef typename F::Elem Elem;
     if (a.empty() || b.empty()) {
         out.clear();
+        return;
+    }
+    if (TraceModFFTEligible(field, a.size(), b.size())) {
+        scratch.fft.MulFull(a, b, out, field);
         return;
     }
     if (std::min(a.size(), b.size()) <= TRACEMOD_POLYMUL_CUTOFF) {

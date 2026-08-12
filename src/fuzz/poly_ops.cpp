@@ -155,6 +155,39 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
         FUZZ_CHECK(ut::Stripped(reduced) == ref_sq);
     }
 
+    // Additive-FFT tier (engaged only for the 32-bit field here; the 11-bit
+    // field is ineligible and keeps exercising the pure Karatsuba path).
+    // Behind a coin flip to keep the average exec cheap.
+    if (bits == 32 && provider.ConsumeBool()) {
+        // fft/ifft roundtrip at a fuzz-chosen dimension.
+        {
+            AdditiveFFT<F> fft;
+            int m = provider.ConsumeIntegralInRange<int>(1, 10);
+            std::vector<Elem> f(size_t(1) << m);
+            for (auto& e : f) e = static_cast<Elem>(provider.ConsumeIntegralInRange<uint64_t>(0, max_elem));
+            auto orig = f;
+            fft.Extend(field, m);
+            fft.FFT(f, m, field);
+            fft.IFFT(f, m, field);
+            FUZZ_CHECK(f == orig);
+        }
+
+        // Products crossing the FFT cutoff, against the schoolbook oracle;
+        // TraceModPolyMulLow must equal the truncated full product.
+        auto fa = ConsumePoly(provider, field, 160);
+        auto fb = ConsumePoly(provider, field, 160);
+        TraceModScratch<F> scratch;
+        std::vector<Elem> full;
+        TraceModPolyMulFull(fa, fb, full, field, scratch, 0);
+        FUZZ_CHECK(ut::Stripped(full) == ut::PolyMulRef(fa, fb, field));
+        size_t n = 1 + provider.ConsumeIntegralInRange<size_t>(0, 340);
+        std::vector<Elem> low;
+        TraceModPolyMulLow(fa, fb, low, n, field, scratch, 0);
+        auto ref_low = full;
+        ref_low.resize(n, 0);
+        FUZZ_CHECK(ut::Stripped(low) == ut::Stripped(ref_low));
+    }
+
     // BerlekampMassey on syndromes of a known root set returns prod (1 + m*x);
     // FindRoots on prod (x + m) returns the set.
     {
