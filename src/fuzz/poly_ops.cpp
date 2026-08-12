@@ -271,6 +271,34 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
             FUZZ_CHECK(low == low_ref);
         }
     }
+
+    // Subquadratic division and gcd against their quadratic references, at
+    // sizes crossing FAST_DIVMOD_CUTOFF and HGCD_CUTOFF. Appended last to
+    // keep the input layout of everything above stable.
+    if (bits == 32 && provider.ConsumeBool()) {
+        auto mod = ConsumeMonicPoly(provider, field, 2, 192);
+        auto val = ConsumePoly(provider, field, 380);
+        std::vector<Elem> q_ref, rem_ref = val, q_fast, rem_fast = val;
+        DivMod(mod, rem_ref, q_ref, field);
+        FastDivMod(mod, rem_fast, q_fast, field);
+        FUZZ_CHECK(q_fast == q_ref);
+        FUZZ_CHECK(rem_fast == rem_ref);
+
+        auto fg = ConsumePoly(provider, field, 48);
+        auto fa2 = ConsumePoly(provider, field, 160);
+        auto fb2 = ConsumePoly(provider, field, 160);
+        if (!fg.empty() && !fa2.empty() && !fb2.empty()) {
+            auto a = ut::PolyMulRef(fa2, fg, field);
+            auto b = ut::PolyMulRef(fb2, fg, field);
+            auto a_ref = a, b_ref = b, a_fast = a, b_fast = b;
+            GCD(a_ref, b_ref, field);
+            FastGCD(a_fast, b_fast, field);
+            FUZZ_CHECK(!a_ref.empty() && !a_fast.empty());
+            MakeMonic(a_ref, field);
+            MakeMonic(a_fast, field);
+            FUZZ_CHECK(a_fast == a_ref);
+        }
+    }
 }
 
 } // namespace

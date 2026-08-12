@@ -19,6 +19,9 @@ static const size_t TRACEMOD_POLYMUL_CUTOFF = 24;
 static const size_t TRACEMOD_TABLE_CUTOFF = 512;
 static const size_t TRACEMOD_FFT_TABLE_CUTOFF = 256;
 static const size_t TRACEMOD_FFT_CUTOFF = 128;
+static const size_t FAST_DIVMOD_CUTOFF = 128;
+static const size_t HGCD_CUTOFF = 128;
+static const size_t HGCD_ITER_CROSSOVER = 24;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -423,6 +426,266 @@ std::vector<typename F::Elem> TraceModInvSeries(const std::vector<typename F::El
     return out;
 }
 
+/** Subquadratic DivMod, same contract as DivMod: divide val by monic mod,
+ * quotient into div (leading coefficient nonzero), remainder into val (size
+ * mod.size() - 1, not stripped). Uses the reciprocal method of
+ * ReciprocalReduce as a one-shot division: the reversed quotient is
+ * rev(val) * InvSeries(rev(mod)) mod x^k, and the remainder follows from one
+ * more low product. Falls back to the schoolbook DivMod below
+ * FAST_DIVMOD_CUTOFF or for fields without the FFT tier, where the
+ * reciprocal setup does not pay for itself. */
+template<typename F>
+void FastDivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::Elem>& val, std::vector<typename F::Elem>& div, const F& field) {
+    typedef typename F::Elem Elem;
+    size_t m = mod.size();
+    CHECK_SAFE(m > 0 && mod.back() == 1);
+    if (val.size() < m) {
+        div.clear();
+        return;
+    }
+    size_t k = val.size() - m + 1;
+    if (!TraceModFFTCapable(field) || std::min(k, m - 1) <= FAST_DIVMOD_CUTOFF) {
+        DivMod(mod, val, div, field);
+        return;
+    }
+    TraceModScratch<F> scratch;
+    std::vector<Elem> rev_mod(m);
+    for (size_t i = 0; i < m; ++i) rev_mod[i] = mod[m - 1 - i];
+    std::vector<Elem> inv;
+    TraceModInvSeries(rev_mod, k, inv, field, scratch);
+    std::vector<Elem> rev_val(k);
+    for (size_t i = 0; i < k; ++i) rev_val[i] = val[val.size() - 1 - i];
+    std::vector<Elem> q_rev;
+    TraceModPolyMulLow(rev_val, inv, q_rev, k, field, scratch, 0);
+    div.resize(k);
+    for (size_t i = 0; i < k; ++i) div[k - 1 - i] = q_rev[i];
+    std::vector<Elem> prod;
+    TraceModPolyMulLow(div, mod, prod, m - 1, field, scratch, 0);
+    val.resize(m - 1);
+    for (size_t i = 0; i < m - 1; ++i) val[i] ^= prod[i];
+}
+
+/* ---------- Subquadratic GCD (half-gcd) ----------
+ *
+ * FastGCD computes gcd like GCD, but reduces large inputs with the classical
+ * recursive half-gcd: the transition matrix of a stretch of the Euclidean
+ * remainder sequence depends only on the top coefficients of the operands
+ * (see von zur Gathen & Gerhard ch. 11; the recursion shape follows NTL's
+ * GF2EX HalfGCD), so it can be computed at half size recursively and applied
+ * to the full-length pair with four multiplications, giving O(M(d) log d)
+ * total. Only the gcd itself is needed (no Bezout coefficients), so no
+ * cofactor back-substitution is performed. */
+
+/** Remove trailing zero coefficients. */
+template<typename E>
+void PolyStrip(std::vector<E>& a) {
+    while (!a.empty() && a.back() == 0) a.pop_back();
+}
+
+/** a ^= b, growing a as needed; result stripped. */
+template<typename E>
+void PolyAddInto(std::vector<E>& a, const std::vector<E>& b) {
+    if (b.size() > a.size()) a.resize(b.size(), 0);
+    for (size_t i = 0; i < b.size(); ++i) a[i] ^= b[i];
+    PolyStrip(a);
+}
+
+/** out = a*b (stripped), tolerating empty operands. out must not alias. */
+template<typename F>
+void PolyMulStripped(const std::vector<typename F::Elem>& a, const std::vector<typename F::Elem>& b, std::vector<typename F::Elem>& out, const F& field, TraceModScratch<F>& scratch) {
+    if (a.empty() || b.empty()) {
+        out.clear();
+        return;
+    }
+    TraceModPolyMulFull(a, b, out, field, scratch, 0);
+    PolyStrip(out);
+}
+
+/** Quotient and remainder for a not-necessarily-monic divisor: den must be
+ * nonempty with den.back() != 0; num (stripped) becomes the stripped
+ * remainder and q the quotient. Schoolbook; used for the single division
+ * steps inside the half-gcd, whose quotients are almost always tiny. */
+template<typename F>
+void DivModNonMonic(const std::vector<typename F::Elem>& den, std::vector<typename F::Elem>& num, std::vector<typename F::Elem>& q, const F& field) {
+    typedef typename F::Elem Elem;
+    CHECK_SAFE(!den.empty() && den.back() != 0);
+    if (num.size() < den.size()) {
+        q.clear();
+        return;
+    }
+    Elem ilead = den.back() == 1 ? Elem(1) : field.Inv(den.back());
+    q.assign(num.size() - den.size() + 1, 0);
+    while (num.size() >= den.size()) {
+        Elem term = ilead == 1 ? num.back() : field.Mul(num.back(), ilead);
+        q[num.size() - den.size()] = term;
+        num.pop_back();
+        if (term != 0) {
+            typename F::Multiplier mul(field, term);
+            for (size_t x = 0; x + 1 < den.size(); ++x) {
+                num[num.size() - den.size() + 1 + x] ^= mul(den[x]);
+            }
+        }
+    }
+    PolyStrip(num);
+}
+
+/** 2x2 matrix of polynomials: the accumulated transition of a stretch of
+ * the remainder sequence, with (u', v')^T = M * (u, v)^T. */
+template<typename F>
+struct PolyMat22 {
+    std::vector<typename F::Elem> e[2][2];
+    void SetIdentity() {
+        e[0][0].assign(1, 1);
+        e[0][1].clear();
+        e[1][0].clear();
+        e[1][1].assign(1, 1);
+    }
+};
+
+/** Fold one division step with quotient q into M: the pair update
+ * (u, v) -> (v, u - q*v) corresponds to rows (m0, m1) -> (m1, m0 + q*m1)
+ * in characteristic 2. */
+template<typename F>
+void PolyMat22Step(PolyMat22<F>& mat, const std::vector<typename F::Elem>& q, const F& field, TraceModScratch<F>& scratch) {
+    std::vector<typename F::Elem> tmp;
+    for (int j = 0; j < 2; ++j) {
+        PolyMulStripped(q, mat.e[1][j], tmp, field, scratch);
+        PolyAddInto(mat.e[0][j], tmp);
+        mat.e[0][j].swap(mat.e[1][j]);
+    }
+}
+
+/** (u, v) <- M * (u, v), results stripped. */
+template<typename F>
+void PolyMat22Apply(const PolyMat22<F>& mat, std::vector<typename F::Elem>& u, std::vector<typename F::Elem>& v, const F& field, TraceModScratch<F>& scratch) {
+    std::vector<typename F::Elem> t00, t01, t10, t11;
+    PolyMulStripped(mat.e[0][0], u, t00, field, scratch);
+    PolyMulStripped(mat.e[0][1], v, t01, field, scratch);
+    PolyMulStripped(mat.e[1][0], u, t10, field, scratch);
+    PolyMulStripped(mat.e[1][1], v, t11, field, scratch);
+    PolyAddInto(t00, t01);
+    PolyAddInto(t10, t11);
+    u.swap(t00);
+    v.swap(t10);
+}
+
+/** out = a * b (matrix product). out must not alias a or b. */
+template<typename F>
+void PolyMat22Mul(PolyMat22<F>& out, const PolyMat22<F>& a, const PolyMat22<F>& b, const F& field, TraceModScratch<F>& scratch) {
+    std::vector<typename F::Elem> tmp;
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            PolyMulStripped(a.e[i][0], b.e[0][j], out.e[i][j], field, scratch);
+            PolyMulStripped(a.e[i][1], b.e[1][j], tmp, field, scratch);
+            PolyAddInto(out.e[i][j], tmp);
+        }
+    }
+}
+
+/** Iterative base case: Euclidean steps on (u, v) with matrix accumulation,
+ * until v is empty or deg(v) <= stop_deg. u and v are consumed. */
+template<typename F>
+void IterHalfGCD(PolyMat22<F>& mat, std::vector<typename F::Elem>& u, std::vector<typename F::Elem>& v, size_t stop_deg, const F& field, TraceModScratch<F>& scratch) {
+    mat.SetIdentity();
+    std::vector<typename F::Elem> q;
+    while (!v.empty() && v.size() - 1 > stop_deg) {
+        DivModNonMonic(v, u, q, field);
+        u.swap(v);
+        PolyMat22Step(mat, q, field, scratch);
+    }
+}
+
+/** Compute the transition matrix M of the remainder sequence of (u, v) —
+ * requires deg(u) > deg(v) — up to the first pair (u', v') with
+ * deg(v') <= deg(u) - d_red. Only the top 2*d_red - 1 coefficients of u
+ * and v influence M (the classical half-gcd truncation lemma), which is
+ * what makes the half-size recursion valid. u and v are unchanged; the
+ * caller applies M to them (or to the full-length pair they were
+ * truncated from). */
+template<typename F>
+void HalfGCDMatrix(PolyMat22<F>& mat, const std::vector<typename F::Elem>& u_in, const std::vector<typename F::Elem>& v_in, size_t d_red, const F& field, TraceModScratch<F>& scratch) {
+    typedef typename F::Elem Elem;
+    CHECK_SAFE(!u_in.empty() && (v_in.empty() || v_in.size() < u_in.size()));
+    if (v_in.empty() || v_in.size() - 1 + d_red <= u_in.size() - 1) {
+        mat.SetIdentity();
+        return;
+    }
+    // Work on the top 2*d_red - 1 coefficients only.
+    size_t deg_u = u_in.size() - 1;
+    size_t shift = deg_u >= 2 * d_red - 2 ? deg_u - (2 * d_red - 2) : 0;
+    std::vector<Elem> u(u_in.begin() + shift, u_in.end());
+    std::vector<Elem> v;
+    if (v_in.size() > shift) v.assign(v_in.begin() + shift, v_in.end());
+    size_t du = u.size() - 1;
+    if (d_red <= HGCD_ITER_CROSSOVER) {
+        IterHalfGCD(mat, u, v, du - d_red, field, scratch);
+        return;
+    }
+    // First half of the reduction, recursively at half size.
+    size_t d1 = (d_red + 1) / 2;
+    PolyMat22<F> m1;
+    HalfGCDMatrix(m1, u, v, d1, field, scratch);
+    PolyMat22Apply(m1, u, v, field, scratch);
+    if (v.empty() || v.size() - 1 + d_red <= du) {
+        mat = m1;
+        return;
+    }
+    // One explicit division step to cross the halfway point.
+    std::vector<Elem> q;
+    DivModNonMonic(v, u, q, field);
+    u.swap(v);
+    PolyMat22Step(m1, q, field, scratch);
+    if (v.empty() || v.size() - 1 + d_red <= du) {
+        mat = m1;
+        return;
+    }
+    // Second half: the remaining degrees to shave, again at half size. The
+    // sub-call's target is relative to its own leading degree, so the
+    // remaining reduction is measured against the current u, giving a final
+    // deg(v) <= (u.size() - 1) - d2 == du - d_red as required.
+    size_t d2 = u.size() - 1 + d_red - du;
+    PolyMat22<F> m2;
+    HalfGCDMatrix(m2, u, v, d2, field, scratch);
+    PolyMat22Mul(mat, m2, m1, field, scratch);
+}
+
+/** Compute the GCD of a and b like GCD (result in a, b destroyed, inputs
+ * stripped), using half-gcd reductions above HGCD_CUTOFF for fields with
+ * the FFT multiplication tier, and the quadratic loop otherwise. */
+template<typename F>
+void FastGCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, const F& field) {
+    typedef typename F::Elem Elem;
+    PolyStrip(a);
+    PolyStrip(b);
+    if (a.size() < b.size()) std::swap(a, b);
+    if (!TraceModFFTCapable(field) || b.size() <= HGCD_CUTOFF) {
+        GCD(a, b, field);
+        return;
+    }
+    TraceModScratch<F> scratch;
+    PolyMat22<F> mat;
+    std::vector<Elem> q;
+    while (!b.empty() && b.size() > HGCD_CUTOFF) {
+        size_t deg_a = a.size() - 1;
+        size_t d_red = (deg_a + 1) / 2;
+        if (b.size() == a.size() || b.size() - 1 + d_red <= deg_a) {
+            // Equal degrees, or the gap already exceeds the half-gcd target:
+            // take one division step (subquadratic for large quotients).
+            MakeMonic(b, field);
+            FastDivMod(b, a, q, field);
+            PolyStrip(a);
+            std::swap(a, b);
+            continue;
+        }
+        HalfGCDMatrix(mat, a, b, d_red, field, scratch);
+        PolyMat22Apply(mat, a, b, field, scratch);
+        // The half-gcd target guarantees progress: deg(b) is now at most
+        // deg_a - d_red < deg_a / 2 + 1 (or b is empty).
+        CHECK_SAFE(b.empty() || b.size() - 1 + d_red <= deg_a);
+    }
+    GCD(a, b, field);
+}
+
 /** Compute repeated TraceMod operations with a fixed modulus.
  * For smaller degrees it precomputes rows x^e mod mod(x) for even e >= deg(mod), so
  * squaring sum a_i*x^i can be reduced by adding a_i^2*(x^(2i) mod mod). For larger
@@ -736,14 +999,14 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             randv = field.Mul2(randv);
             tmp = poly;
             MINISKETCH_COZ_BEGIN("findroots-gcd");
-            GCD(trace, tmp, field);
+            FastGCD(trace, tmp, field);
             MINISKETCH_COZ_END("findroots-gcd");
             if (trace.size() != poly.size() && trace.size() > 1) break;
         }
     }
     MakeMonic(trace, field);
     MINISKETCH_COZ_BEGIN("findroots-divmod");
-    DivMod(trace, poly, tmp, field);
+    FastDivMod(trace, poly, tmp, field);
     MINISKETCH_COZ_END("findroots-divmod");
     // At this point, the stack looks like [... (poly) tmp trace], and we want to recursively
     // find roots of trace and tmp (= poly/trace). As we don't care about poly anymore, move
