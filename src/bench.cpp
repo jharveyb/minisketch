@@ -14,13 +14,15 @@
 #include <algorithm>
 
 int main(int argc, char** argv) {
-    if (argc < 1 || argc > 4) {
-        printf("Usage: %s [syndromes=150] [errors=syndromes] [iters=10]\n", argv[0]);
+    if (argc < 1 || argc > 5) {
+        printf("Usage: %s [syndromes=150] [errors=syndromes] [iters=10] [bits=0]\n", argv[0]);
+        printf("  bits: only benchmark the given field size (0 = all)\n");
         return 1;
     }
     int syndromes = argc > 1 ? strtoul(argv[1], NULL, 10) : 150;
     int errors = argc > 2 ? strtoul(argv[2], NULL, 10) : syndromes;
     int iters = argc > 3 ? strtoul(argv[3], NULL, 10) : 10;
+    int only_bits = argc > 4 ? strtoul(argv[4], NULL, 10) : 0;
     if (syndromes < 0 || syndromes > 1000000) {
         printf("Number of syndromes (%i) out of range 0..1000000\n", syndromes);
         return 1;
@@ -33,8 +35,13 @@ int main(int argc, char** argv) {
         printf("Number of iterations (%i) out of range 0..1000000000\n", iters);
         return 1;
     }
+    if (only_bits != 0 && (only_bits < 2 || only_bits > 64)) {
+        printf("Field size (%i) out of range 2..64 (or 0 for all)\n", only_bits);
+        return 1;
+    }
     uint32_t max_impl = minisketch_implementation_max();
     for (int bits = 2; bits <= 64; ++bits) {
+        if (only_bits != 0 && bits != only_bits) continue;
         if (errors > pow(2.0, bits - 1)) continue;
         if (!minisketch_bits_supported(bits)) continue;
         printf("recover[ms]\t% 3i\t", bits);
