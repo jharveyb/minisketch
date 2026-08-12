@@ -248,6 +248,29 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
             FUZZ_CHECK(found == roots);
         }
     }
+
+    // Prepared-operand FFT multiplication (the cached-transform reducer path)
+    // against MulLow, at the minimal and the oversized transform size.
+    // Appended last so the input layout of everything above (and the seed
+    // corpus) is unaffected.
+    if (bits == 32 && provider.ConsumeBool()) {
+        auto fb = ConsumePoly(provider, field, 160);
+        auto fa = ConsumePoly(provider, field, 160);
+        if (!fa.empty() && !fb.empty()) {
+            AdditiveFFT<F> fft;
+            size_t prod = fa.size() + fb.size() - 1;
+            int m = 1;
+            while ((size_t(1) << m) < prod) ++m;
+            if (provider.ConsumeBool()) ++m;
+            std::vector<Elem> b_fft;
+            fft.Prepare(fb, m, field, b_fft);
+            size_t n = 1 + provider.ConsumeIntegralInRange<size_t>(0, 340);
+            std::vector<Elem> low, low_ref;
+            fft.MulLowPrepared(fa, b_fft, fb.size(), m, low, n, field);
+            fft.MulLow(fa, fb, low_ref, n, field);
+            FUZZ_CHECK(low == low_ref);
+        }
+    }
 }
 
 } // namespace

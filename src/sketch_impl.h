@@ -441,6 +441,13 @@ class TraceMod {
 
     std::vector<Elem> rev_mod, inv;
 
+    // Cached 2^fft_m-point transforms of the two per-node-constant reducer
+    // operands (inv and mod), or fft_m == 0 when the FFT tier does not apply
+    // to this node. With them, a full-size ReciprocalReduce costs four
+    // transforms instead of six.
+    int fft_m = 0;
+    std::vector<Elem> inv_fft, mod_fft;
+
     // Reused buffers for SquareReduce/ReciprocalReduce, and the scratch pool
     // for the Karatsuba multiplications, hoisted here so the trace loop is
     // allocation-free in steady state.
@@ -482,6 +489,19 @@ public:
             rev_mod.resize(m);
             for (size_t i = 0; i < m; ++i) rev_mod[i] = mod[m - 1 - i];
             TraceModInvSeries(rev_mod, m - 1, inv, field, scratch);
+            // Every product in ReciprocalReduce has length at most 2*d, so a
+            // fixed 2^fft_m >= 2*d transform size fits them all; the two
+            // one-time Prepare transforms amortize over the (Bits-1)-round
+            // trace loop and the fully-factorizable test.
+            if (TraceModFFTCapable(field) && 2 * d - 1 >= TRACEMOD_FFT_CUTOFF) {
+                int t = 1;
+                while ((size_t(1) << t) < 2 * d && t < 64) ++t;
+                if (t <= field.Bits()) {
+                    fft_m = t;
+                    scratch.fft.Prepare(inv, fft_m, field, inv_fft);
+                    scratch.fft.Prepare(mod, fft_m, field, mod_fft);
+                }
+            }
         }
     }
 
@@ -515,18 +535,38 @@ private:
         while (!val.empty() && val.back() == 0) val.pop_back();
     }
 
+    /** Whether MulLowPrepared beats the dynamic multiplication path for a
+     * product of (truncated) operand lengths la and lb: exactly when the
+     * dynamic path would run the FFT at the node transform size anyway, so
+     * the cached operand transform saves one of its three transforms. For
+     * anything smaller the dynamic path (half-size FFT, Karatsuba or naive)
+     * is cheaper than a fixed full-size transform. */
+    bool CachedMulEligible(size_t la, size_t lb) const {
+        if (fft_m == 0) return false;
+        if (!TraceModFFTEligible(field, la, lb)) return false;
+        return la + lb - 1 > (size_t(1) << (fft_m - 1));
+    }
+
     void ReciprocalReduce(std::vector<Elem>& val) {
         size_t m = mod.size();
         if (val.size() < m) return;
         size_t k = val.size() - m + 1;
         rev_val.resize(k);
         for (size_t i = 0; i < k; ++i) rev_val[i] = val[val.size() - 1 - i];
-        TraceModPolyMulLow(rev_val, inv, q_rev, k, field, scratch, 0);
+        if (CachedMulEligible(k, std::min(inv.size(), k))) {
+            scratch.fft.MulLowPrepared(rev_val, inv_fft, inv.size(), fft_m, q_rev, k, field);
+        } else {
+            TraceModPolyMulLow(rev_val, inv, q_rev, k, field, scratch, 0);
+        }
         quot.resize(k);
         for (size_t i = 0; i < k; ++i) quot[k - 1 - i] = q_rev[i];
         while (!quot.empty() && quot.back() == 0) quot.pop_back();
         size_t rem_len = m - 1;
-        TraceModPolyMulLow(quot, mod, prod, rem_len, field, scratch, 0);
+        if (CachedMulEligible(quot.size(), std::min(mod.size(), rem_len))) {
+            scratch.fft.MulLowPrepared(quot, mod_fft, mod.size(), fft_m, prod, rem_len, field);
+        } else {
+            TraceModPolyMulLow(quot, mod, prod, rem_len, field, scratch, 0);
+        }
         for (size_t i = 0; i < prod.size(); ++i) val[i] ^= prod[i];
         val.resize(rem_len);
         while (!val.empty() && val.back() == 0) val.pop_back();

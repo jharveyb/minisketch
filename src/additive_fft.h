@@ -191,6 +191,43 @@ public:
         while (!out.empty() && out.back() == 0) out.pop_back();
     }
 
+    /** Transform v into its 2^m-point evaluation table for reuse as the
+     *  fixed operand of MulLowPrepared calls. Requires v.size() <= 2^m; out
+     *  is caller-owned and must not alias a transform buffer. */
+    void Prepare(const std::vector<Elem>& v, int m, const F& field, std::vector<Elem>& out) {
+        Extend(field, m);
+        CHECK_SAFE(v.size() <= (size_t(1) << m));
+        out.assign(size_t(1) << m, 0);
+        std::copy(v.begin(), v.end(), out.begin());
+        FFT(out, m, field);
+    }
+
+    /** out = a*b mod x^n with out.size() == n exactly (the MulLow contract),
+     *  where b_fft is Prepare(b, m)'s output and b_size is b's length.
+     *  Requires a.size() + b_size - 1 <= 2^m, so the product cannot wrap
+     *  around the evaluation set. Costs two transforms instead of MulLow's
+     *  three when b's transform is reused across calls. out must not alias
+     *  a or b_fft. */
+    void MulLowPrepared(const std::vector<Elem>& a, const std::vector<Elem>& b_fft, size_t b_size, int m, std::vector<Elem>& out, size_t n, const F& field) {
+        CHECK_SAFE(m >= 1 && m <= max_t && b_fft.size() == (size_t(1) << m));
+        CHECK_SAFE(!a.empty() && b_size > 0 && a.size() + b_size - 1 <= (size_t(1) << m));
+        size_t n_points = size_t(1) << m;
+        buf_a.assign(n_points, 0);
+        std::copy(a.begin(), a.end(), buf_a.begin());
+        FFT(buf_a, m, field);
+        for (size_t i = 0; i < n_points; ++i) buf_a[i] = field.Mul(buf_a[i], b_fft[i]);
+        IFFT(buf_a, m, field);
+        size_t prod = a.size() + b_size - 1;
+#ifdef MINISKETCH_VERIFY
+        // Wraparound tripwire, as in MulFull: coefficients at or above the
+        // product length must have interpolated to zero.
+        for (size_t i = prod; i < buf_a.size(); ++i) CHECK_SAFE(buf_a[i] == 0);
+#endif
+        out.assign(n, 0);
+        size_t copy = std::min(prod, n);
+        for (size_t i = 0; i < copy; ++i) out[i] = buf_a[i];
+    }
+
     /** out = a*b mod x^n, with out.size() == n exactly (not stripped, like
      *  PolyMulLowNaive). out must not alias a or b. */
     void MulLow(const std::vector<Elem>& a, const std::vector<Elem>& b, std::vector<Elem>& out, size_t n, const F& field) {
