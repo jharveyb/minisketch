@@ -39,6 +39,16 @@
 #define MINISKETCH_COZ_END(name)
 #endif
 
+/* Keep large cold functions out of their callers (instantiating them inline
+ * inside a hot recursion measurably hurts its code locality). */
+#if defined(__GNUC__)
+#define NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define NOINLINE __declspec(noinline)
+#else
+#define NOINLINE
+#endif
+
 /* Assertion macros */
 
 /**

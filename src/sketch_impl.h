@@ -19,7 +19,7 @@ static const size_t TRACEMOD_POLYMUL_CUTOFF = 24;
 static const size_t TRACEMOD_TABLE_CUTOFF = 512;
 static const size_t TRACEMOD_FFT_TABLE_CUTOFF = 256;
 static const size_t TRACEMOD_FFT_CUTOFF = 128;
-static const size_t FAST_DIVMOD_CUTOFF = 512;
+static const size_t FAST_DIVMOD_CUTOFF = 1024;
 static const size_t HGCD_CUTOFF = 1024;
 static const size_t HGCD_ITER_CROSSOVER = 24;
 
@@ -452,7 +452,7 @@ size_t FastDivModCutoff(const F& field) {
  * FastDivModCutoff(field); tests pass smaller values to exercise the
  * reciprocal path at small sizes). */
 template<typename F>
-void FastDivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::Elem>& val, std::vector<typename F::Elem>& div, const F& field, size_t cutoff) {
+NOINLINE void FastDivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::Elem>& val, std::vector<typename F::Elem>& div, const F& field, size_t cutoff) {
     typedef typename F::Elem Elem;
     size_t m = mod.size();
     CHECK_SAFE(m > 0 && mod.back() == 1);
@@ -682,7 +682,7 @@ size_t FastGCDCutoff(const F& field) {
  * `cutoff` (pass FastGCDCutoff(field); tests pass smaller values to
  * exercise the half-gcd at small sizes), and the quadratic loop below. */
 template<typename F>
-void FastGCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, const F& field, size_t cutoff) {
+NOINLINE void FastGCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, const F& field, size_t cutoff) {
     typedef typename F::Elem Elem;
     PolyStrip(a);
     PolyStrip(b);
