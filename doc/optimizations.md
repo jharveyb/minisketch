@@ -323,70 +323,94 @@ References:
 * Bernstein, *Multiplication of polynomials over F₂* survey
   (<https://cr.yp.to/f2mult.html>)
 
-## Next: subquadratic GCD (roadmap)
+## Implemented: subquadratic division and GCD
 
-With the FFT tier and cached transforms in place, the quadratic GCD is the
-next structural bottleneck: `GCD(trace, poly)` runs once per split attempt
-at every `RecFindRoots` node (~d² multiplications at degree d, ~2d² summed
-over the recursion — at capacity 4096 already comparable to the whole
-FFT-accelerated trace stage), plus one quadratic `DivMod` per successful
-split. Berlekamp-Massey stays adaptive O(e·n) and only matters when e ≈ n.
+With the FFT tier and cached transforms in place, the quadratic
+`GCD(trace, poly)` (once per split attempt at every `RecFindRoots` node)
+and the quadratic `DivMod` (once per successful split) were the next
+structural bottleneck: ~2d² multiplications summed over the recursion, at
+capacity 4096 comparable to the whole FFT-accelerated trace stage. Both
+are now subquadratic (`src/sketch_impl.h`), following the algorithm choice
+of the mid-2026 literature review: **classic recursive half-gcd, gcd-only
+— not jumpdivstep** (van der Hoeven arXiv:2212.12389 for the constants;
+NTL's `GF2EX` for the recursion shape; polynomial divstep is ~2× behind in
+the same multiplication model and stays relevant only for a hypothetical
+constant-time decoder).
 
-Algorithm choice (literature review, mid-2026):
+* **FastDivMod** divides by a monic divisor with the reciprocal method the
+  reducer already uses — Newton inverse series of the reversed divisor to
+  quotient-length precision, one low product for the reversed quotient,
+  one more for the remainder.
+* **FastGCD** reduces large pairs with the half-gcd: the transition matrix
+  of a stretch of the remainder sequence depends only on the top
+  2·d_red−1 coefficients of the pair (the classical truncation lemma), so
+  `HalfGCDMatrix` computes it recursively at half size — first-half
+  matrix, one explicit division step, second-half matrix, composed with
+  2×2 polynomial matrix products — and the driver applies it to the
+  full-length pair with four multiplications, halving deg(b) per outer
+  round: O(M(d) log d), all products through the additive-FFT tier. No
+  Bezout coefficients are computed (the split step needs only the gcd).
+  The quadratic loop remains as the base case and as the recursion's
+  iterative bottom (`HGCD_ITER_CROSSOVER = 24`).
 
-* **Classic recursive HGCD, gcd-only — not jumpdivstep.** The
-  root-splitting step needs only the gcd itself, not Bezout coefficients,
-  which drops the cofactor reconstruction. van der Hoeven, *Optimizing the
-  half-gcd algorithm* (arXiv:2212.12389) gives ~5.5·M(d)·log₂d in the FFT
-  model for *normal* remainder sequences — the expected case over
-  GF(2<sup>m</sup>), where sequences are normal with probability
-  1 − O(d/2<sup>m</sup>) — via middle products and transform caching
-  across the 2×2-matrix recursion. Both tricks fit the additive FFT; the
-  `Prepare`/`MulLowPrepared` entry point is the needed hook. (An earlier
-  note here claimed the paper's FFT-model constants were "not reachable in
-  characteristic 2" — true before the additive-FFT tier existed, obsolete
-  now.)
-* Polynomial **divstep** (safegcd §3–7, eprint 2019/266) processes exactly
-  2d−1 steps, cannot exploit degree drops, and lands ~2× behind optimized
-  HGCD in the same multiplication model; its constant-time regularity is
-  irrelevant to decode (the decoder is variable-time by design, and BM is
-  a Euclid special case per the paper — see below). The one measured
-  jumpdivstep implementation (Jian-Wang-Yang-Chen, eprint 2024/644, NTRU
-  Prime inversion) crosses over against *quadratic divstep* at degree
-  ~653 and confirms transform caching as the main practical lever. Keep
-  divstep in reserve only for a hypothetical constant-time decoder (no
-  published divstep-over-GF(2<sup>m</sup>)[x] implementation appears to
-  exist), along with libsecp256k1's batched transition-matrix trick
-  (`doc/safegcd_implementation.md`) as a memory-traffic optimization.
-* **Crossover evidence**: NTL's `GF2EX` (the same coefficient-ring shape)
-  switches Euclid→HGCD around degree 40 with recursion base 40; FLINT's
-  `nmod_poly` at ~340 over cheaper word-size prime fields. Expect ours in
-  the 100–500 range; sweep it.
-* **Honest ceiling**: at d = 4096, ~5.5·M(d)·log₂d ≈ 11M multiplications
-  (M(4096) ≈ 168k with the FFT tier) vs ~16.7M quadratic — ~1.5× on the
-  gcd itself by the naive constant, growing with capacity and with the
-  constant-factor tricks; the structural point is that decode stops being
-  quadratic overall.
-* **Fast BM** via the Dornstetter/key-equation equivalence (one partial
-  XGCD at degree 2t; modern formulation: PM-Basis minimal approximants,
-  practical in Neiger's PML library at degrees 10³–10⁵) only wins when
-  e ≈ n, since the current BM is adaptive O(e·n): the pragmatic hybrid
-  keeps adaptive BM and restarts with the HGCD key-equation solver when
-  the LFSR length crosses a tuned threshold. Strictly after the gcd work.
+### What the measurements actually said
 
-Implementation order (branch `subquadratic-gcd`):
+The textbook/NTL crossover estimates (degree 40–340) were off by an order
+of magnitude here, for the same reason the affine root solvers lost
+(above): **the baseline is strong**. The schoolbook remainder steps are
+Multiplier-row operations, allocation-free and cache-friendly — a whole
+degree-1024 quadratic gcd costs ~1–2 ms — while the half-gcd pays FFT
+setup, matrix products, and allocation churn. Interleaved sweeps with
+disabled-path control rows (which calibrated ±5% measurement noise on
+this hardware, and exposed one systematic effect worth recording):
 
-1. Subquadratic `DivMod` after each successful split, using the existing
-   reciprocal machinery (`TraceModInvSeries` + two `MulLow`s) — the same
-   algorithm `ReciprocalReduce` already uses, as a one-shot division with
-   quotient output. Small, low-risk, immediately measurable.
-2. Recursive gcd-only HGCD over `TraceModPolyMulFull` with a swept
-   degree-cutoff fallback to the quadratic loop; van der Hoeven
-   middle-product and transform-caching constants. Tests per `testing.md`:
-   property tests against the quadratic GCD reference, a poly_ops fuzz
-   mirror, planted mutations. Acceptance: no regression at any capacity,
-   measured win at 2048+.
-3. Hybrid fast-BM key-equation solver, gated on measured e ≈ n profiles.
+* Engage cutoffs at or below degree 512 regressed 1024-syndrome decode by
+  ~20%; `HGCD_CUTOFF = 1024` is neutral at 1024/2048 syndromes and wins
+  at 4096.
+* The **generic implementation regressed at every tested cutoff** (its
+  FFT butterflies pay Multiplier table builds), so both fast paths gate
+  on the cheap-scalar-Multiplier heuristic (`TraceModCheapScalarMul`,
+  shared with the table cutoff): generic fields keep the quadratic loop.
+* `FAST_DIVMOD_CUTOFF = 1024`: division alone measured neutral below
+  that, positive in combination with the half-gcd at 4096.
+* **Inlining find**: merely instantiating the fast paths at their
+  `RecFindRoots` call sites cost a consistent ~5% at 1024 syndromes even
+  though they never executed there — a control build with reverted call
+  sites (templates never instantiated) matched the old branch exactly,
+  attributing the loss to code bloat in the hot recursion. `NOINLINE` on
+  the two entry points (new macro in `util.h`) restored parity. Moral:
+  when an A/B shows a regression the algorithm cannot explain, check the
+  code layout before the code.
+
+Final measured decode (interleaved, alternating order, min over runs, vs
+the cached-transform tip):
+
+| syndromes/errors | 64-bit CLMUL | 32-bit CLMUL | 64-bit generic |
+|---|---|---|---|
+| 1024/1024 | parity | parity | parity (gated) |
+| 2048/2048 | parity | — | parity (gated) |
+| 4096/4096 | 284.8 → 264.4 ms (1.08×) | 172.6 → 151.6 ms (1.14×) | parity (gated) |
+
+Cumulative vs the pre-FFT baseline at 4096/4096: **765 → 264 ms (2.89×)
+on 64-bit CLMUL**, 350 → 152 ms (2.31×) on 32-bit CLMUL.
+
+### Remaining in this area
+
+* **Constant-factor half-gcd work** is the lever to push the crossover
+  below 1024 and grow the 4096 win: middle products for the matrix-vector
+  applications, transform caching across the 2×2 matrix recursion (the
+  vdH / eprint 2024/644 trick; `Prepare`/`MulLowPrepared` is the hook),
+  and a scratch pool for the per-call matrix/temporary allocations.
+* **Hybrid fast Berlekamp-Massey** via the Dornstetter/key-equation
+  equivalence (partial XGCD at degree 2t; modern form: PM-Basis
+  approximants, practical in Neiger's PML at degrees 10³–10⁵): only wins
+  when the difference count approaches capacity, since the current BM is
+  adaptive O(e·n); gate on measured e ≈ n profiles.
+* What is still worth taking from safegcd: libsecp256k1's batched
+  transition-matrix trick (`doc/safegcd_implementation.md`) as a
+  memory-traffic optimization, and divstep's data-independent shape if a
+  constant-time decoder is ever required (no published
+  divstep-over-GF(2<sup>m</sup>)[x] implementation appears to exist).
 
 References: <https://arxiv.org/abs/2212.12389>,
 <https://eprint.iacr.org/2019/266>, <https://eprint.iacr.org/2024/644>,
