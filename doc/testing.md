@@ -109,6 +109,13 @@ for TraceMod (as in the `fast_tracemod_reducers` branch):
    `tools/fuzz_stats.sh 300` (5 minutes per target).
 4. Compare `tools/coverage.sh` output before/after to confirm the new code is
    actually exercised (watch the per-file lines column for `sketch_impl.h`).
+5. Check test power over the change: plant one or two design-level bugs by
+   hand (see "Test power" below) and run `MULL_DIFF_REF=<base-ref>
+   tools/mutation.sh` to sweep operator-level mutants over just the diff
+   (see "Mutation testing").
+6. If the change is performance-motivated, measure it with
+   `tools/bench_ab.sh <base-ref> .` (see "Performance measurement") rather
+   than ad-hoc timing.
 
 ## Metrics
 
@@ -273,11 +280,15 @@ occasionally to fold in the high-capacity finds that fast-only updates skip.
 
 ### Test power (mutation spot-checks)
 
-There is no automated mutation-testing setup, but planted-bug checks are the
-quality bar for this suite: flipping an operator or an index in
-`sketch_impl.h` (e.g. the discrepancy XOR in `BerlekampMassey`) should be
-caught by the `unit-tests` binary in under a second. When adding new algorithm
-code, plant a bug and confirm a test notices before trusting the green run.
+Planted-bug checks are the design-level quality bar for this suite: flipping
+an operator or an index in `sketch_impl.h` (e.g. the discrepancy XOR in
+`BerlekampMassey`) should be caught by the `unit-tests` binary in under a
+second. When adding new algorithm code, plant a bug and confirm a test
+notices before trusting the green run. Hand-planted mutations remain the
+right tool for *targeted* checks — "a bug of this specific shape must be
+caught at this specific layer" (e.g. a bug that roundtrip identities cannot
+see must fall to a direct-evaluation property); the automated sweep below
+does not replace that judgment.
 
 Results so far (2026-07):
 
@@ -293,3 +304,127 @@ Results so far (2026-07):
   dropped Karatsuba middle-term correction — were each caught by `unit-tests`
   within seconds, at the failing property, while the full suite passes on the
   unmutated branch.
+
+### Mutation testing (Mull)
+
+`tools/mutation.sh` sweeps operator-level mutants with
+[Mull](https://mull-project.com/) (installed as the `mull-21` package; the
+version suffix must match the clang that compiles the mutated build). It
+compiles `unit-tests` with Mull's IR plugin — which embeds every mutant into
+the binary at compile time, scoped by `mull.yml` at the repo root — then
+`mull-runner` executes the binary once per mutant and reports each as killed
+(a test failed), survived (all tests passed), or timed out (counted as
+killed: mutations that hang loops).
+
+```
+tools/mutation.sh                          # full sweep of the mull.yml scope
+MULL_DIFF_REF=master tools/mutation.sh     # only mutants on lines changed vs master
+CTEST_FIELDS="11;32;64" tools/mutation.sh  # thorough: add the 64-bit field cases
+```
+
+Operational notes:
+
+- The killer binary is built with a reduced field list (default `11;32`) so
+  a full test run takes seconds. The default omits 64 deliberately: Mull's
+  per-mutation-point runtime guards slow the *generic* 64-bit cases ~80×
+  (the whole suite goes from ~1 s to ~190 s), and while killed mutants die
+  at the first failing check, the warmup and every surviving mutant pay the
+  full run.
+- Scope and mutators live in `mull.yml`: the algorithm headers
+  (`sketch_impl.h`, `int_utils.h`, `additive_fft.h` where present), with
+  `cxx_default` plus the bitwise and logical groups (the XOR-heavy GF(2^m)
+  code makes those the most meaningful operators). Widening `includePaths`
+  is the lever for broader campaigns.
+- Surviving mutants are findings about the *tests*, not necessarily bugs:
+  triage each as (a) a missing assertion worth adding, (b) semantically
+  equivalent to the original (e.g. mutating a value that is only an upper
+  bound), or (c) unreachable under the reduced field list. Record notable
+  survivors here rather than chasing a score of 100%.
+
+Baseline (2026-08, `test-additions`, default scope and fields): **199
+mutants, 152 killed, 47 survived (76% kill rate), 12 minutes** on 8
+workers. Survivor triage, as an example of the categories above:
+
+- ~6 `reserve()` capacity hints (`BerlekampMassey`, `FindRoots`) —
+  equivalent, results cannot change.
+- The GCD operand-order swap condition — equivalent, the algorithm is
+  order-insensitive.
+- The schoolbook `PolyMod`/`DivMod` inner-loop bound (`<` → `<=`) — the
+  extra iteration writes one element past the remainder, which only a
+  sanitizer can see: invisible to the plain unit binary but covered by the
+  ASan `poly_ops` fuzz target. A good reminder that the layers back each
+  other up.
+- Genuine minor gaps: the `minisketch_decode` API error-path guards and the
+  non-factorizable fast-abort counter in `RecFindRoots` are not exercised
+  under the reduced field list.
+
+The `MULL_DIFF_REF` mode is the intended per-change workflow (step 5 of
+"Swapping a decode-stage implementation"): it mutates only the diff, so a
+run completes in minutes even though a full-scope campaign takes an hour or
+more.
+
+## Performance measurement
+
+Performance claims in this repo have been burned twice by measurement
+artifacts, so both benchmarking and profiling are scripted with the
+protocol built in.
+
+### Benchmark A/B protocol
+
+`tools/bench_ab.sh <ref-A> [ref-B=HEAD]` builds `bench` from two git refs
+('.' = the current working tree) with identical flags (`-g -O2`), measures
+every configuration in alternating-order rounds, and reports per side the
+best time plus the min→max spread of the per-round values:
+
+```
+tools/bench_ab.sh master .                        # current tree vs master
+CONFIGS="4096 4096 3 64" RUNS=7 tools/bench_ab.sh <ref> .
+```
+
+Protocol rules, learned the hard way:
+
+- **Quiet machine.** No builds, indexing, or other load during measurement:
+  concurrent compilation has inflated short rows ~2.5×. The script builds
+  everything before the first measurement; do not edit files while it runs.
+- **Alternate the order.** Same-order sweeps show order-correlated
+  thermal/frequency drift that reads as a consistent fake delta. The script
+  alternates sides every round.
+- **A delta must beat the spread.** The noise floor on desktop hardware is
+  a few percent; rows whose spread exceeds `NOISE_PCT` (default 3%) are
+  flagged. Sub-millisecond rows additionally show bimodal scheduling
+  jitter — only warm min-of-many runs see through it.
+- **Suspect code layout before the algorithm.** A consistent delta that the
+  changed code cannot explain (e.g. it never executes in that
+  configuration) can be pure inlining/code-placement effects on the hot
+  paths. The control that settles it: build ref-B with only the changed
+  call sites reverted — unused templates are not instantiated, so a control
+  matching ref-A attributes the delta to layout. This is how the FastGCD
+  NOINLINE regression was found; keeping large cold entry points `NOINLINE`
+  avoids the class.
+
+### Causal profiling (Coz)
+
+`tools/coz.sh [syndromes] [errors] [bits] [loops]` builds `bench` with
+progress points (`-DMINISKETCH_COZ=ON`) and runs its profiling mode (5th
+argument: decode every state repeatedly, one `COZ_PROGRESS` per decode,
+highest available implementation only) under the
+[Coz causal profiler](https://github.com/plasma-umass/coz):
+
+```
+sudo sysctl kernel.perf_event_paranoid=1   # once per boot; coz needs perf events
+tools/coz.sh 1024 1024 64 50
+(cd build-coz && coz plot)                 # or load the .jsonl in /usr/share/coz/viewer
+```
+
+Coz runs virtual-speedup experiments and answers "if this source line were
+p% faster, how much faster would whole decodes complete?" — the number that
+actually decides whether an optimization or cutoff change is worth
+pursuing. Decode is single-threaded, so the contention effects causal
+profiling is famous for (downward slopes) cannot appear here; the profile
+is a measured per-line Amdahl chart, and its value over a conventional
+profiler is that it reports *end-to-end impact* rather than time share.
+Interpretation: steep upward slope = optimize this line; flat = don't
+bother regardless of its time share. Pick sizes where decodes complete a
+few times per second (syndromes 512–2048); each experiment needs several
+progress-point visits, so very slow configurations converge slowly (use
+more loops, or `COZ_ARGS="--end-to-end"`).
