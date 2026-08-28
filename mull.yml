@@ -1,0 +1,39 @@
+# Mull mutation-testing configuration (https://mull-project.com/), consumed
+# by both the compiler plugin (via the MULL_CONFIG environment variable set
+# by tools/mutation.sh - cmake compiles from the build directory, so the
+# cwd-based lookup does not apply) and mull-runner.
+#
+# Scope starts narrow: the algorithm headers where decode correctness lives.
+# Widening includePaths is the knob for broader campaigns; the mutant count
+# (and hence runtime) grows with it. The mutator set covers the operators
+# that matter for GF(2^m) polynomial code: cxx_default is
+# increment/arithmetic/comparison/boundary, and the XOR-heavy inner loops
+# make the bitwise and logical groups the most meaningful additions.
+
+mutators:
+  - cxx_default
+  - cxx_bitwise
+  - cxx_logical
+
+includePaths:
+  - ".*sketch_impl\\.h"
+  - ".*int_utils\\.h"
+  # Present on the perf branches; harmless where the file does not exist.
+  - ".*additive_fft\\.h"
+
+excludePaths:
+  - ".*unit_tests.*"
+  - ".*test_.*"
+  - ".*fuzz.*"
+  - "/usr/.*"
+
+# The killer binary is unit-tests built with a reduced field list (see
+# tools/mutation.sh); a full run takes a few seconds, so allow a generous
+# multiple before declaring a mutant a timeout (= killed).
+timeout: 60000
+
+quiet: true
+
+parallelization:
+  workers: 8
+  executionWorkers: 8

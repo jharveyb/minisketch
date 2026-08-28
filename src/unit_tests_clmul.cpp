@@ -55,22 +55,45 @@ bool ClmulSupported() {
     }
 
 /* Small fields (FieldTri* are the trinomial-modulus specializations). */
+#ifndef DISABLE_FIELD_2
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_tri_2, FieldTri2)
+#endif
+#ifndef DISABLE_FIELD_3
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_tri_3, FieldTri3)
+#endif
+#ifndef DISABLE_FIELD_5
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_5, Field5)
+#endif
+#ifndef DISABLE_FIELD_5
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_tri_5, FieldTri5)
+#endif
+#ifndef DISABLE_FIELD_8
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_8, Field8)
+#endif
 
 /* Representative larger fields, matching the generic TU's selection. */
+#ifndef DISABLE_FIELD_11
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_11, Field11)
+#endif
+#ifndef DISABLE_FIELD_11
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_tri_11, FieldTri11)
+#endif
+#ifndef DISABLE_FIELD_16
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_16, Field16)
+#endif
+#ifndef DISABLE_FIELD_27
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_27, Field27)
+#endif
+#ifndef DISABLE_FIELD_32
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_32, Field32)
+#endif
+#ifndef DISABLE_FIELD_64
 MINISKETCH_CLMUL_FIELD_TEST(clmul_field_64, Field64)
+#endif
 
 /* Full decode pipeline at capacity 1024 with 64-bit elements (the intended
  * practical configuration). */
+#ifndef DISABLE_FIELD_64
 BOOST_AUTO_TEST_CASE(clmul_field_64_capacity_1024) {
     if (!ClmulSupported()) {
         BOOST_TEST_MESSAGE("CPU lacks CLMUL support; skipping");
@@ -80,5 +103,6 @@ BOOST_AUTO_TEST_CASE(clmul_field_64_capacity_1024) {
     TestRand rng(g_test_seed + 64002);
     ut::TestDecodeStagesLarge(field, rng, 1024);
 }
+#endif
 
 #endif // HAVE_CLMUL
