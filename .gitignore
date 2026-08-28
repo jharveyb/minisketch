@@ -43,3 +43,8 @@ bench
 /*build*
 
 __pycache__/
+
+# Stray causal-profiler output (tools/coz.sh writes into its build dir, but a
+# bare 'coz run' drops the profile in the cwd).
+profile.jsonl
+*.coz

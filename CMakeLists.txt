@@ -59,6 +59,7 @@ endif()
 
 option(MINISKETCH_BUILD_TESTS "Build tests." ON)
 option(MINISKETCH_BUILD_BENCHMARK "Build benchmark." OFF)
+option(MINISKETCH_COZ "Add Coz causal-profiler progress points to the benchmark (requires coz.h and MINISKETCH_BUILD_BENCHMARK)." OFF)
 option(MINISKETCH_BUILD_FUZZ "Build libFuzzer fuzz targets (requires Clang); instruments the whole build with fuzzer,address,undefined sanitizers." OFF)
 
 if(MINISKETCH_BUILD_FUZZ)
