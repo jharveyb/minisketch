@@ -44,29 +44,55 @@ struct SeedFixture {
 BOOST_TEST_GLOBAL_FIXTURE(SeedFixture);
 
 /* Small fields: field ops are checked exhaustively over all element pairs. */
+#ifndef DISABLE_FIELD_2
 MINISKETCH_FIELD_TEST(generic_field_2, Field2)
+#endif
+#ifndef DISABLE_FIELD_3
 MINISKETCH_FIELD_TEST(generic_field_3, Field3)
+#endif
+#ifndef DISABLE_FIELD_4
 MINISKETCH_FIELD_TEST(generic_field_4, Field4)
+#endif
+#ifndef DISABLE_FIELD_5
 MINISKETCH_FIELD_TEST(generic_field_5, Field5)
+#endif
+#ifndef DISABLE_FIELD_6
 MINISKETCH_FIELD_TEST(generic_field_6, Field6)
+#endif
+#ifndef DISABLE_FIELD_7
 MINISKETCH_FIELD_TEST(generic_field_7, Field7)
+#endif
+#ifndef DISABLE_FIELD_8
 MINISKETCH_FIELD_TEST(generic_field_8, Field8)
+#endif
 
 /* Representative larger fields, including the odd-size (non-byte-aligned)
  * 11- and 27-bit fields and the widest 64-bit field. */
+#ifndef DISABLE_FIELD_11
 MINISKETCH_FIELD_TEST(generic_field_11, Field11)
+#endif
+#ifndef DISABLE_FIELD_16
 MINISKETCH_FIELD_TEST(generic_field_16, Field16)
+#endif
+#ifndef DISABLE_FIELD_27
 MINISKETCH_FIELD_TEST(generic_field_27, Field27)
+#endif
+#ifndef DISABLE_FIELD_32
 MINISKETCH_FIELD_TEST(generic_field_32, Field32)
+#endif
+#ifndef DISABLE_FIELD_64
 MINISKETCH_FIELD_TEST(generic_field_64, Field64)
+#endif
 
 /* Full decode pipeline at capacity 1024 with 64-bit elements (the intended
  * practical configuration); ~1s, by far the largest case in this suite. */
+#ifndef DISABLE_FIELD_64
 BOOST_AUTO_TEST_CASE(generic_field_64_capacity_1024) {
     Field64 field;
     TestRand rng(g_test_seed + 64001);
     ut::TestDecodeStagesLarge(field, rng, 1024);
 }
+#endif
 
 /* BitWriter/BitReader roundtrip with a mix of write widths crossing byte
  * boundaries; the field Serialize/Deserialize roundtrips in the per-field
