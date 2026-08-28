@@ -13,6 +13,12 @@
 #include <set>
 #include <algorithm>
 
+#ifdef MINISKETCH_COZ
+#include <coz.h>
+#else
+#define COZ_PROGRESS_NAMED(name)
+#endif
+
 // Human-readable name for each implementation ID; must stay in sync with
 // FieldImpl in src/minisketch.cpp.
 static const char* ImplName(uint32_t impl) {
@@ -199,6 +205,7 @@ int main(int argc, char** argv) {
     int errors = -1;
     int iters = 10;
     int bits = 64;
+    int loops = 0;
 
     for (int i = 1; i < argc; ++i) {
         char* a = argv[i];
@@ -235,6 +242,8 @@ int main(int argc, char** argv) {
             errors = (int)strtol(v, NULL, 10);
         } else if (ParseFlagValue(a, "--iters", 7, argc, argv, i, v)) {
             iters = (int)strtol(v, NULL, 10);
+        } else if (ParseFlagValue(a, "--loops", 7, argc, argv, i, v)) {
+            loops = (int)strtol(v, NULL, 10);
         } else if (ParseFlagValue(a, "--bits", 6, argc, argv, i, v)) {
             explicit_bits = true;
             bits = (int)strtol(v, NULL, 10);
@@ -336,6 +345,47 @@ int main(int argc, char** argv) {
                 }
             }
         }
+    } else if (loops > 0) {
+            // Profiling mode: an untimed, flat decode workload with a progress
+            // point per decode, shaped for causal profilers and perf. Only the
+            // highest available implementation runs, so samples of the shared
+            // template code are not smeared across implementations.
+        for (int bits = 2; bits <= 64; ++bits) {
+            if (!minisketch_bits_supported(bits)) continue;
+            uint32_t impl = max_impl + 1;
+            std::vector<minisketch*> states(iters, nullptr);
+            while (impl > 0 && !states[0]) {
+                --impl;
+                states[0] = minisketch_create(bits, impl, syndromes);
+            }
+            if (!states[0]) continue;
+            std::random_device rng;
+            std::uniform_int_distribution<uint64_t> dist(1, (uint64_t(1) << bits) - 1);
+            std::vector<uint64_t> roots(2 * syndromes);
+            for (int i = 0; i < iters; ++i) {
+                if (!states[i]) states[i] = minisketch_create(bits, impl, syndromes);
+                std::set<uint64_t> done;
+                for (int j = 0; j < errors; ++j) {
+                    uint64_t r;
+                    do {
+                        r = dist(rng);
+                    } while (done.count(r));
+                    done.insert(r);
+                    minisketch_add_uint64(states[i], r);
+                }
+            }
+            for (int l = 0; l < loops; ++l) {
+                for (auto& state : states) {
+                    minisketch_decode(state, 2 * syndromes, roots.data());
+                    COZ_PROGRESS_NAMED("decode");
+                }
+            }
+            for (auto& state : states) {
+                minisketch_destroy(state);
+            }
+            printf("profiled\t% 3i\t%i states x %i loops, impl %u\n", bits, iters, loops, impl);
+            continue;
+        }
     } else {
         for (int bits = 2; bits <= 64; ++bits) {
             if (!minisketch_bits_supported(bits)) continue;
@@ -353,6 +403,5 @@ int main(int argc, char** argv) {
             }
             RunCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
         }
-    }
     return 0;
 }
