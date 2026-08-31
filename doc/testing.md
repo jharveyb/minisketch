@@ -441,7 +441,11 @@ so their granularity is ~1/#experiments; and `-O2` inlining collapses much
 of decode into few source lines (the `minisketch_decode` API line
 "winning" means "the whole decode" and carries no information) — the
 stage markers are the reliable axis, and line entries within
-`sketch_impl.h` refine them.
+`sketch_impl.h` refine them. (Coz 0.2.5 writes stage records as
+`latency_point` but its viewer only accepts `latency-point`; coz.sh
+normalizes the profile after the run — if the viewer shows "Invalid
+Profile" warnings on a raw profile, apply
+`sed -i 's/"type":"latency_point"/"type":"latency-point"/g'` to it.)
 
 Baseline example (this branch, pre-optimization algorithms, 64-bit,
 512/512 and 1024/1024): root finding is ~100% of decode wall time, its
