@@ -48,6 +48,13 @@ target_compile_definitions(minisketch_verify
     MINISKETCH_VERIFY
 )
 target_link_libraries(minisketch_verify PRIVATE minisketch_field_sources)
+
+if(MINISKETCH_COZ)
+  # The stage markers in the library resolve their counters via dlsym at
+  # runtime; propagate the dl dependency to every consumer.
+  target_link_libraries(minisketch PUBLIC ${CMAKE_DL_LIBS})
+  target_link_libraries(minisketch_verify PUBLIC ${CMAKE_DL_LIBS})
+endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   target_compile_options(minisketch_verify
     PRIVATE
@@ -105,15 +112,6 @@ endif()
 if(MINISKETCH_BUILD_BENCHMARK)
   add_executable(bench bench.cpp)
   target_link_libraries(bench PRIVATE minisketch)
-  if(MINISKETCH_COZ)
-    include(CheckIncludeFileCXX)
-    check_include_file_cxx(coz.h HAVE_COZ_H)
-    if(NOT HAVE_COZ_H)
-      message(FATAL_ERROR "MINISKETCH_COZ requires coz.h (install the Coz profiler, e.g. the coz-profiler package).")
-    endif()
-    target_compile_definitions(bench PRIVATE MINISKETCH_COZ)
-    target_link_libraries(bench PRIVATE ${CMAKE_DL_LIBS})
-  endif()
 endif()
 
 if(MINISKETCH_BUILD_FUZZ)

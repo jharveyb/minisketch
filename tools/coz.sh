@@ -65,5 +65,7 @@ coz run --source-scope "$SCOPE" --output "$PROFILE" ${COZ_ARGS:-} --- \
     "$BUILD_DIR/bin/bench" "$SYNDROMES" "$ERRORS" 8 "$BITS" "$LOOPS"
 
 echo
+python3 tools/coz_summary.py "$PROFILE"
+echo
 echo "Profile: $PROFILE"
 echo "View:    (cd $(dirname "$PROFILE") && coz plot)   # or open /usr/share/coz/viewer/index.htm"

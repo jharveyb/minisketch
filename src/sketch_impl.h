@@ -165,7 +165,9 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
     for (int iter = 0;; ++iter) {
         // Compute the polynomial (trace(x*randv) mod poly(x)) symbolically,
         // and put the result in `trace`.
+        MINISKETCH_COZ_BEGIN("findroots-trace");
         TraceMod(poly, trace, randv, field);
+        MINISKETCH_COZ_END("findroots-trace");
 
         if (iter >= 1 && !fully_factorizable) {
             // If the polynomial cannot be factorized completely (it has an
@@ -231,11 +233,15 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
         // of randv values forms a GF(2)-linearly independent basis of splits.
         randv = field.Mul2(randv);
         tmp = poly;
+        MINISKETCH_COZ_BEGIN("findroots-gcd");
         GCD(trace, tmp, field);
+        MINISKETCH_COZ_END("findroots-gcd");
         if (trace.size() != poly.size() && trace.size() > 1) break;
     }
     MakeMonic(trace, field);
+    MINISKETCH_COZ_BEGIN("findroots-divmod");
     DivMod(trace, poly, tmp, field);
+    MINISKETCH_COZ_END("findroots-divmod");
     // At this point, the stack looks like [... (poly) tmp trace], and we want to recursively
     // find roots of trace and tmp (= poly/trace). As we don't care about poly anymore, move
     // trace into its position first.
@@ -401,13 +407,19 @@ public:
 
     int Decode(int max_count, uint64_t* out) const override
     {
+        MINISKETCH_COZ_BEGIN("decode-syndromes");
         auto all_syndromes = ReconstructAllSyndromes(m_syndromes, m_field);
+        MINISKETCH_COZ_END("decode-syndromes");
+        MINISKETCH_COZ_BEGIN("decode-berlekamp-massey");
         auto poly = BerlekampMassey(all_syndromes, max_count, m_field);
+        MINISKETCH_COZ_END("decode-berlekamp-massey");
         if (poly.size() == 0) return -1;
         if (poly.size() == 1) return 0;
         if ((int)poly.size() > 1 + max_count) return -1;
         std::reverse(poly.begin(), poly.end());
+        MINISKETCH_COZ_BEGIN("decode-findroots");
         auto roots = FindRoots(poly, m_basis, m_field);
+        MINISKETCH_COZ_END("decode-findroots");
         if (roots.size() == 0) return -1;
 
         for (const auto& root : roots) {

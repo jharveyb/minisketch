@@ -59,7 +59,7 @@ endif()
 
 option(MINISKETCH_BUILD_TESTS "Build tests." ON)
 option(MINISKETCH_BUILD_BENCHMARK "Build benchmark." OFF)
-option(MINISKETCH_COZ "Add Coz causal-profiler progress points to the benchmark (requires coz.h and MINISKETCH_BUILD_BENCHMARK)." OFF)
+option(MINISKETCH_COZ "Add Coz causal-profiler progress points to the benchmark and decode-stage markers to the library (requires coz.h)." OFF)
 option(MINISKETCH_BUILD_FUZZ "Build libFuzzer fuzz targets (requires Clang); instruments the whole build with fuzzer,address,undefined sanitizers." OFF)
 
 if(MINISKETCH_BUILD_FUZZ)
@@ -73,6 +73,18 @@ if(MINISKETCH_BUILD_FUZZ)
   # Make sketch construction entropy-free so fuzz runs are reproducible; the
   # fuzz targets set input-derived bases via SetSeed().
   add_compile_definitions(MINISKETCH_FUZZ_DETERMINISTIC)
+endif()
+
+if(MINISKETCH_COZ)
+  include(CheckIncludeFileCXX)
+  check_include_file_cxx(coz.h HAVE_COZ_H)
+  if(NOT HAVE_COZ_H)
+    message(FATAL_ERROR "MINISKETCH_COZ requires coz.h (install the Coz profiler).")
+  endif()
+  # The whole build gets the define: the library compiles its decode-stage
+  # markers in, and bench compiles its progress point in. Use a dedicated
+  # build directory (tools/coz.sh manages one).
+  add_compile_definitions(MINISKETCH_COZ)
 endif()
 
 set(supported_fields "")
