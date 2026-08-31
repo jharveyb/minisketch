@@ -28,7 +28,8 @@ for line in open(path):
         cur = {"selected": rec["selected"], "speedup": rec["speedup"],
                "duration": rec["duration"], "points": {}}
         experiments.append(cur)
-    elif t in ("latency_point", "throughput_point", "progress_point") and cur is not None:
+    elif t in ("latency_point", "latency-point", "throughput_point",
+               "throughput-point", "progress-point") and cur is not None:
         cur["points"][rec["name"]] = rec
 
 # Stage shares: duration-weighted mean of `difference` over speedup-0

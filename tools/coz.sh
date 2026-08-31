@@ -64,6 +64,12 @@ PROFILE="$BUILD_DIR/coz-s${SYNDROMES}-e${ERRORS}-b${BITS}.jsonl"
 coz run --source-scope "$SCOPE" --output "$PROFILE" ${COZ_ARGS:-} --- \
     "$BUILD_DIR/bin/bench" "$SYNDROMES" "$ERRORS" 8 "$BITS" "$LOOPS"
 
+# Coz 0.2.5 spelling mismatch: libcoz writes "latency_point" records (the
+# decode-stage markers) but the viewer only accepts "latency-point" (it
+# tolerates both spellings for throughput points), so every stage line would
+# trigger its Invalid Profile warning. Normalize to the viewer's spelling.
+sed -i 's/"type":"latency_point"/"type":"latency-point"/g' "$PROFILE"
+
 echo
 python3 tools/coz_summary.py "$PROFILE"
 echo
