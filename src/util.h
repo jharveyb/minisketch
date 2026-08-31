@@ -26,6 +26,19 @@
 #define EXPECT(x,c) (x)
 #endif
 
+/* Decode-stage markers for the Coz causal profiler (doc/testing.md,
+ * "Causal profiling"). In MINISKETCH_COZ builds these are COZ_BEGIN/COZ_END
+ * latency progress points, so profiles report per-stage impact directly; in
+ * normal builds they are no-ops and coz.h is not included. */
+#ifdef MINISKETCH_COZ
+#include <coz.h>
+#define MINISKETCH_COZ_BEGIN(name) COZ_BEGIN(name)
+#define MINISKETCH_COZ_END(name) COZ_END(name)
+#else
+#define MINISKETCH_COZ_BEGIN(name)
+#define MINISKETCH_COZ_END(name)
+#endif
+
 /* Assertion macros */
 
 /**

@@ -428,3 +428,27 @@ bother regardless of its time share. Pick sizes where decodes complete a
 few times per second (syndromes 512–2048); each experiment needs several
 progress-point visits, so very slow configurations converge slowly (use
 more loops, or `COZ_ARGS="--end-to-end"`).
+
+Besides the per-decode throughput point in bench, `MINISKETCH_COZ` builds
+compile **decode-stage markers** into the library
+(`MINISKETCH_COZ_BEGIN/END` in `util.h`, no-ops otherwise): latency pairs
+around syndrome reconstruction, Berlekamp-Massey, and root finding, and
+inside root finding around the trace computation, gcd, and factor
+division. `tools/coz_summary.py` (run automatically by coz.sh) turns these
+into a stage-share table plus the top causal lines. Two reading caveats:
+stage shares are built from one active/inactive snapshot per experiment,
+so their granularity is ~1/#experiments; and `-O2` inlining collapses much
+of decode into few source lines (the `minisketch_decode` API line
+"winning" means "the whole decode" and carries no information) — the
+stage markers are the reliable axis, and line entries within
+`sketch_impl.h` refine them.
+
+Baseline example (this branch, pre-optimization algorithms, 64-bit,
+512/512 and 1024/1024): root finding is ~100% of decode wall time, its
+trace computation 94–100%, factor division ~6% at 512, and
+syndromes/BM/gcd all sample at 0% — with `sketch_impl.h`'s `PolyMod` call
+inside the `TraceMod` loop measuring ~94% program speedup at 100% line
+speedup. That reproduces, by measurement, the cost model that motivated
+the TraceMod-reducer and additive-FFT work on the perf branches: the
+trace-loop reduction is the only thing worth optimizing at these sizes on
+this branch.
