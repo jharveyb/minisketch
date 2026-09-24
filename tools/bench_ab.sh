@@ -36,7 +36,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REF_A="${1:?usage: tools/bench_ab.sh <ref-A> [ref-B=HEAD]}"
 REF_B="${2:-HEAD}"
-CONFIGS="${CONFIGS:-1024 1024 7 64|2048 2048 5 64|4096 4096 3 64}"
+CONFIGS="${CONFIGS:-32 32 7 64| 128 128 7 64| 512 512 7 64| 1024 1024 7 64|2048 2048 5 64|4096 4096 3 64}"
 RUNS="${RUNS:-5}"
 NOISE_PCT="${NOISE_PCT:-3}"
 
@@ -73,10 +73,27 @@ build_side() {
     echo "$dir/bin/bench"
 }
 
+# A bench binary predating the bits argument prints its usage line to stdout
+# (which the measurement loop redirects into the data file) and exits 1 -
+# probe each binary up front so that fails loudly instead of silently.
+probe_side() {
+    local ref="$1" bin="$2" out
+    if ! out=$("$bin" 16 16 1 64 2>&1); then
+        printf '%s\n' "$out" >&2
+        echo "error: bench at $ref does not accept the 4-argument form (bits)." >&2
+        echo "Cherry-pick the bench bits-argument commit onto it first, e.g.:" >&2
+        echo "  git worktree add /tmp/wt $ref && git -C /tmp/wt cherry-pick 722fed56" >&2
+        echo "then benchmark the resulting commit." >&2
+        exit 1
+    fi
+}
+
 echo "Building A: $REF_A"
 BIN_A=$(build_side "$REF_A" a)
 echo "Building B: $REF_B"
 BIN_B=$(build_side "$REF_B" b)
+probe_side "$REF_A" "$BIN_A"
+probe_side "$REF_B" "$BIN_B"
 echo "Measuring: $RUNS alternating rounds per config; keep the machine idle."
 echo
 
@@ -91,8 +108,12 @@ for cfg in "${CONFIG_ROWS[@]}"; do
         if (( run % 2 )); then order="A B"; else order="B A"; fi
         for side in $order; do
             bin="$BIN_A"; [ "$side" = B ] && bin="$BIN_B"
-            "$bin" "$syn" "$err" "$it" "$bits" \
-                >> "$DATA/${side}_${tag}.txt"
+            if ! "$bin" "$syn" "$err" "$it" "$bits" \
+                >> "$DATA/${side}_${tag}.txt"; then
+                echo "error: bench (side $side, config '$cfg') failed; its output:" >&2
+                tail -5 "$DATA/${side}_${tag}.txt" >&2
+                exit 1
+            fi
         done
     done
 done
