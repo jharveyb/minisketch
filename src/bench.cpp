@@ -5,7 +5,10 @@
  **********************************************************************/
 
 #include "../include/minisketch.h"
-#include <string.h>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <vector>
 #include <chrono>
@@ -32,7 +35,7 @@ static const char* ImplName(uint32_t impl) {
 
 // Print CLI usage; invoked on --help/-h or on any argument error.
 static void PrintUsage(const char* prog) {
-    printf("Usage: %s [--sweep] [--sweep-errors] [--create-only] [--data-sweep] [--add-batch] [--impl N] [--data N] [--syndromes N] [--errors N] [--iters N]\n", prog);
+    printf("Usage: %s [--sweep] [--sweep-errors] [--create-only] [--decode-only] [--data-sweep] [--add-batch] [--impl N] [--data N] [--syndromes N] [--errors N] [--iters N] [--bits N] [--loops N]\n", prog);
     printf("  --sweep          run fixed matrix: bits in {64}, capacity in {1024,2048,...,8192}\n");
     printf("                   (in sweep mode --syndromes is ignored)\n");
     printf("  --sweep-errors   for each swept capacity, test errors at 10%%, 25%%, 50%%, 75%%, 100%% of capacity\n");
@@ -52,6 +55,12 @@ static void PrintUsage(const char* prog) {
     printf("  --syndromes N    sketch capacity in non-sweep mode (default: 150, range 0..1000000)\n");
     printf("  --errors N       number of elements per sketch (default: syndromes; range >= 0)\n");
     printf("  --iters N        benchmark iterations (default: 10, range 0..1000000000)\n");
+    printf("  --decode-only    skip the 'create' benchmark, only run the 'recover' benchmark\n");
+    printf("                   (conflicts with --create-only and --data-sweep)\n");
+    printf("  --bits N         restrict to field size N (default: 2..64, or the --sweep bit sizes)\n");
+    printf("  --loops N        profiling mode: untimed decodes of --iters sketches, repeated N times,\n");
+    printf("                   highest available implementation only, with a Coz progress point\n");
+    printf("                   per decode (ignored with --sweep)\n");
 }
 
 // Emit the column header exactly once so stdout is a valid long-format TSV.
@@ -85,7 +94,7 @@ static void RunDecodeBench(int bits, int syndromes, int errors, int iters,
                 minisketch_add_uint64(states[i], r);
             }
         }
-        if (states[0]) {
+        if (!states.empty() && states[0]) {
             for (auto& state : states) {
                 auto start = std::chrono::steady_clock::now();
                 minisketch_decode(state, 2 * syndromes, roots.data());
@@ -145,7 +154,7 @@ static void RunCreateBench(int bits, int syndromes, int errors, int iters,
         for (size_t i = 0; i < data.size(); ++i) {
             data[i] = dist(rng);
         }
-        if (states[0]) {
+        if (!states.empty() && states[0]) {
             for (auto& state : states) {
                 auto start = std::chrono::steady_clock::now();
                 if (add_batch) {
@@ -195,6 +204,7 @@ int main(int argc, char** argv) {
     bool sweep = false;
     bool sweep_errors = false;
     bool create_only = false;
+    bool decode_only = false;
     bool data_sweep = false;
     bool add_batch = false;
     uint32_t batch_size = 4;
@@ -220,6 +230,8 @@ int main(int argc, char** argv) {
             sweep = true;
         } else if (strcmp(a, "--create-only") == 0) {
             create_only = true;
+        } else if (strcmp(a, "--decode-only") == 0) {
+            decode_only = true;
         } else if (strcmp(a, "--data-sweep") == 0) {
             data_sweep = true;
             create_only = true;
@@ -281,6 +293,18 @@ int main(int argc, char** argv) {
         printf("--data-sweep conflicts with --sweep-errors\n");
         return 1;
     }
+    if (decode_only && create_only) {
+        printf("--decode-only conflicts with --create-only and --data-sweep\n");
+        return 1;
+    }
+    if (explicit_bits && !minisketch_bits_supported(bits)) {
+        printf("--bits value (%i) is not a supported field size\n", bits);
+        return 1;
+    }
+    if (loops < 0) {
+        printf("--loops (%i) is negative\n", loops);
+        return 1;
+    }
 
     uint32_t max_impl = minisketch_implementation_max();
     if (impl_pin != -1) {
@@ -309,10 +333,9 @@ int main(int argc, char** argv) {
     // 6 bytes with CLMUL where BITS % 8 == 0, 8 bytes with CLMUL_TRI, and finally
     // BITS == 64 for CLMUL.
     std::vector<int> default_bits_sweep = {16, 29, 32, 48, 58, 64};
-    std::vector<int> custom_bits_sweep = {bits, 0, 0, 0, 0, 0};
     if (sweep) {
         const int caps[] = {128, 256, 512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192};
-        std::vector<int> const bits_sweep = explicit_bits ? custom_bits_sweep : default_bits_sweep;
+        std::vector<int> const bits_sweep = explicit_bits ? std::vector<int>{bits} : default_bits_sweep;
         const int errcounts[] = {8, 16, 32, 64, 128, 256, 384, 512, 768, 1024, 1536, 2048};
         for (int bits : bits_sweep) {
             if (!minisketch_bits_supported(bits)) continue;
@@ -329,7 +352,7 @@ int main(int argc, char** argv) {
                     for (int errcount : errcounts) {
                         if (errcount <= cap) {
                             err_list.push_back(errcount);
-                        } 
+                        }
                     }
                 } else {
                     err_list.push_back(errors_given ? errors : cap);
@@ -341,20 +364,31 @@ int main(int argc, char** argv) {
                     if (!create_only) {
                         RunDecodeBench(bits, cap, eff_errors, iters, impl_lo, impl_hi);
                     }
-                    RunCreateBench(bits, cap, eff_errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
+                    if (!decode_only) {
+                        RunCreateBench(bits, cap, eff_errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
+                    }
                 }
             }
         }
-    } else if (loops > 0) {
-            // Profiling mode: an untimed, flat decode workload with a progress
-            // point per decode, shaped for causal profilers and perf. Only the
-            // highest available implementation runs, so samples of the shared
-            // template code are not smeared across implementations.
-        for (int bits = 2; bits <= 64; ++bits) {
+        return 0;
+    }
+
+    const int bits_lo = explicit_bits ? bits : 2;
+    const int bits_hi = explicit_bits ? bits : 64;
+    if (loops > 0) {
+        // Profiling mode: an untimed, flat decode workload with a progress
+        // point per decode, shaped for causal profilers and perf. Only the
+        // highest available implementation (within --impl) runs, so samples
+        // of the shared template code are not smeared across implementations.
+        if (iters < 1) {
+            printf("--loops requires --iters >= 1\n");
+            return 1;
+        }
+        for (int bits = bits_lo; bits <= bits_hi; ++bits) {
             if (!minisketch_bits_supported(bits)) continue;
-            uint32_t impl = max_impl + 1;
+            uint32_t impl = impl_hi + 1;
             std::vector<minisketch*> states(iters, nullptr);
-            while (impl > 0 && !states[0]) {
+            while (impl > impl_lo && !states[0]) {
                 --impl;
                 states[0] = minisketch_create(bits, impl, syndromes);
             }
@@ -383,25 +417,29 @@ int main(int argc, char** argv) {
             for (auto& state : states) {
                 minisketch_destroy(state);
             }
-            printf("profiled\t% 3i\t%i states x %i loops, impl %u\n", bits, iters, loops, impl);
+            // stderr, so stdout stays pure TSV.
+            fprintf(stderr, "profiled bits=%i: %i states x %i loops, impl %s\n", bits, iters, loops, ImplName(impl));
+        }
+        return 0;
+    }
+
+    for (int bits = bits_lo; bits <= bits_hi; ++bits) {
+        if (!minisketch_bits_supported(bits)) continue;
+        if (data_sweep) {
+            for (long data_len : data_lens_sweep) {
+                RunCreateBench(bits, syndromes, /*errors=*/0, iters, data_len,
+                               impl_lo, impl_hi, add_batch, batch_size);
+            }
             continue;
         }
-    } else {
-        for (int bits = 2; bits <= 64; ++bits) {
-            if (!minisketch_bits_supported(bits)) continue;
-            if (data_sweep) {
-                for (long data_len : data_lens_sweep) {
-                    RunCreateBench(bits, syndromes, /*errors=*/0, iters, data_len,
-                                   impl_lo, impl_hi, add_batch, batch_size);
-                }
-                continue;
-            }
-            if (errors > pow(2.0, bits - 1)) continue;
-            long data_len = (data_override >= 0) ? data_override : (long)errors * 10;
-            if (!create_only) {
-                RunDecodeBench(bits, syndromes, errors, iters, impl_lo, impl_hi);
-            }
+        if (errors > pow(2.0, bits - 1)) continue;
+        long data_len = (data_override >= 0) ? data_override : (long)errors * 10;
+        if (!create_only) {
+            RunDecodeBench(bits, syndromes, errors, iters, impl_lo, impl_hi);
+        }
+        if (!decode_only) {
             RunCreateBench(bits, syndromes, errors, iters, data_len, impl_lo, impl_hi, add_batch, batch_size);
         }
+    }
     return 0;
 }

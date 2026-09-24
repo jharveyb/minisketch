@@ -374,7 +374,10 @@ protocol built in.
 `tools/bench_ab.sh <ref-A> [ref-B=HEAD]` builds `bench` from two git refs
 ('.' = the current working tree) with identical flags (`-g -O2`), measures
 every configuration in alternating-order rounds, and reports per side the
-best time plus the min→max spread of the per-round values:
+best time plus the min→max spread of the per-round values. Each side's
+`bench` CLI is detected (the `--flag` CLI, or the older positional
+`syndromes errors iters bits` form), so refs from before the benchmarking
+CLI rewrite stay measurable:
 
 ```
 tools/bench_ab.sh master .                        # current tree vs master
@@ -405,8 +408,8 @@ Protocol rules, learned the hard way:
 ### Causal profiling (Coz)
 
 `tools/coz.sh [syndromes] [errors] [bits] [loops]` builds `bench` with
-progress points (`-DMINISKETCH_COZ=ON`) and runs its profiling mode (5th
-argument: decode every state repeatedly, one `COZ_PROGRESS` per decode,
+progress points (`-DMINISKETCH_COZ=ON`) and runs its profiling mode
+(`--loops N`: decode every state repeatedly, one `COZ_PROGRESS` per decode,
 highest available implementation only) under the
 [Coz causal profiler](https://github.com/plasma-umass/coz):
 

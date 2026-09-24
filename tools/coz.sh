@@ -12,7 +12,7 @@
 # cutoff change is worth pursuing.
 #
 # Configures a dedicated build directory with progress points enabled, builds
-# bench, and runs it under coz in profiling mode (bench's 5th argument; only
+# bench, and runs it under coz in profiling mode (bench's --loops flag; only
 # the highest available field implementation runs, so line samples are not
 # smeared across implementations). Writes
 #   <build-dir>/coz-s<syndromes>-e<errors>-b<bits>.jsonl
@@ -62,7 +62,8 @@ cmake --build "$BUILD_DIR" --target bench -j "$(nproc)"
 PROFILE="$BUILD_DIR/coz-s${SYNDROMES}-e${ERRORS}-b${BITS}.jsonl"
 # shellcheck disable=SC2086  # COZ_ARGS is intentionally word-split
 coz run --source-scope "$SCOPE" --output "$PROFILE" ${COZ_ARGS:-} --- \
-    "$BUILD_DIR/bin/bench" "$SYNDROMES" "$ERRORS" 8 "$BITS" "$LOOPS"
+    "$BUILD_DIR/bin/bench" --syndromes "$SYNDROMES" --errors "$ERRORS" --iters 8 \
+        --bits "$BITS" --loops "$LOOPS"
 
 # Coz 0.2.5 spelling mismatch: libcoz writes "latency_point" records (the
 # decode-stage markers) but the viewer only accepts "latency-point" (it

@@ -22,8 +22,11 @@
 #    a control matching the old ref attributes the delta to layout/inlining,
 #    as happened with the FastGCD NOINLINE find.
 #
-# The bench binary needs the bits argument (present since the additive-FFT
-# series); older refs need that commit cherry-picked to be measurable.
+# Both bench CLIs are supported, detected per side: the flag CLI
+# (--syndromes/--errors/--iters/--bits/--decode-only, long-format TSV output)
+# and the older positional one ("syndromes errors iters bits", one wide row per
+# field size). Positional refs need the bits argument (present since the
+# additive-FFT series); older ones need that commit cherry-picked.
 #
 # Environment:
 #   CONFIGS    '|'-separated "syndromes errors iters bits" rows
@@ -36,7 +39,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REF_A="${1:?usage: tools/bench_ab.sh <ref-A> [ref-B=HEAD]}"
 REF_B="${2:-HEAD}"
-CONFIGS="${CONFIGS:-1024 1024 7 64|2048 2048 5 64|4096 4096 3 64}"
+CONFIGS="${CONFIGS:-32 32 7 64| 128 128 7 64| 512 512 7 64| 1024 1024 7 64|2048 2048 5 64|4096 4096 3 64}"
 RUNS="${RUNS:-5}"
 NOISE_PCT="${NOISE_PCT:-3}"
 
@@ -73,10 +76,44 @@ build_side() {
     echo "$dir/bin/bench"
 }
 
+# Run one decode measurement with the CLI style detected for the binary.
+run_bench() {
+    local style="$1" bin="$2" syn="$3" err="$4" it="$5" bits="$6"
+    if [ "$style" = flags ]; then
+        "$bin" --syndromes "$syn" --errors "$err" --iters "$it" --bits "$bits" --decode-only
+    else
+        "$bin" "$syn" "$err" "$it" "$bits"
+    fi
+}
+
+# Detect which CLI a binary speaks; prints "flags" or "positional". A binary
+# rejecting both prints its usage line to stdout (which the measurement loop
+# would redirect into the data file) and exits 1 - probe each binary up front
+# so that fails loudly instead of silently.
+probe_side() {
+    local ref="$1" bin="$2" out style
+    for style in flags positional; do
+        if run_bench "$style" "$bin" 16 16 1 64 > /dev/null 2>&1; then
+            echo "$style"
+            return
+        fi
+    done
+    out=$(run_bench positional "$bin" 16 16 1 64 2>&1 || true)
+    printf '%s\n' "$out" >&2
+    echo "error: bench at $ref accepts neither the flag CLI (--bits, --decode-only)" >&2
+    echo "nor the 4-argument positional form (bits)." >&2
+    echo "Cherry-pick the bench bits-argument commit onto it first, e.g.:" >&2
+    echo "  git worktree add /tmp/wt $ref && git -C /tmp/wt cherry-pick 722fed56" >&2
+    echo "then benchmark the resulting commit." >&2
+    exit 1
+}
+
 echo "Building A: $REF_A"
 BIN_A=$(build_side "$REF_A" a)
 echo "Building B: $REF_B"
 BIN_B=$(build_side "$REF_B" b)
+STYLE_A=$(probe_side "$REF_A" "$BIN_A")
+STYLE_B=$(probe_side "$REF_B" "$BIN_B")
 echo "Measuring: $RUNS alternating rounds per config; keep the machine idle."
 echo
 
@@ -90,9 +127,14 @@ for cfg in "${CONFIG_ROWS[@]}"; do
     for (( run = 1; run <= RUNS; run++ )); do
         if (( run % 2 )); then order="A B"; else order="B A"; fi
         for side in $order; do
-            bin="$BIN_A"; [ "$side" = B ] && bin="$BIN_B"
-            "$bin" "$syn" "$err" "$it" "$bits" \
-                >> "$DATA/${side}_${tag}.txt"
+            bin="$BIN_A"; style="$STYLE_A"
+            [ "$side" = B ] && { bin="$BIN_B"; style="$STYLE_B"; }
+            if ! run_bench "$style" "$bin" "$syn" "$err" "$it" "$bits" \
+                >> "$DATA/${side}_${tag}.txt"; then
+                echo "error: bench (side $side, config '$cfg') failed; its output:" >&2
+                tail -5 "$DATA/${side}_${tag}.txt" >&2
+                exit 1
+            fi
         done
     done
 done
@@ -103,15 +145,19 @@ for cfg in "${CONFIG_ROWS[@]}"; do
     tag="s${syn}-e${err}-b${bits}"
     for side in A B; do
         awk -v b="$bits" -v tag="$tag" -v side="$side" -v noise="$NOISE_PCT" '
-            $1 == "recover[ms]" && $2 == b {
-                for (i = 3; i <= 4; i++) {
-                    c = i - 2
-                    if ($i == "-") continue
-                    if (!seen[c] || $i < min[c]) min[c] = $i
-                    if (!seen[c] || $i > max[c]) max[c] = $i
-                    seen[c] = 1
-                }
+            function add(c, v) {
+                if (v == "-") return
+                if (!seen[c] || v < min[c]) min[c] = v
+                if (!seen[c] || v > max[c]) max[c] = v
+                seen[c] = 1
             }
+            # Long-format TSV (flag CLI): metric bits capacity errors data_len impl value
+            $1 == "recover[ms]" && $2 == b && NF == 7 {
+                if ($6 == "GENERIC") add(1, $7)
+                else if ($6 == "CLMUL") add(2, $7)
+            }
+            # Wide row (positional CLI): metric bits impl0 impl1 ...
+            $1 == "recover[ms]" && $2 == b && NF != 7 { add(1, $3); add(2, $4) }
             END {
                 printf "%-18s %-4s", tag, side
                 for (c = 1; c <= 2; c++) {
