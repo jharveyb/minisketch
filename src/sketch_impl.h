@@ -13,6 +13,39 @@
 #include "sketch.h"
 #include "int_utils.h"
 
+/* Algorithm crossover cutoffs. Each can be overridden at build time with
+ * -DMINISKETCH_<NAME>=<value> (e.g. for cross-machine tuning via
+ * tools/bench_ab.sh CXXFLAGS_B); the defaults were tuned on Zen 5. */
+#ifndef MINISKETCH_TRACEMOD_POLYMUL_CUTOFF
+#define MINISKETCH_TRACEMOD_POLYMUL_CUTOFF 24
+#endif
+#ifndef MINISKETCH_TRACEMOD_TABLE_CUTOFF
+#define MINISKETCH_TRACEMOD_TABLE_CUTOFF 512
+#endif
+#ifndef MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF
+#define MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF 256
+#endif
+#ifndef MINISKETCH_TRACEMOD_FFT_CUTOFF
+#define MINISKETCH_TRACEMOD_FFT_CUTOFF 128
+#endif
+#ifndef MINISKETCH_FAST_DIVMOD_CUTOFF
+#define MINISKETCH_FAST_DIVMOD_CUTOFF 1024
+#endif
+#ifndef MINISKETCH_HGCD_CUTOFF
+#define MINISKETCH_HGCD_CUTOFF 1024
+#endif
+#ifndef MINISKETCH_HGCD_ITER_CROSSOVER
+#define MINISKETCH_HGCD_ITER_CROSSOVER 24
+#endif
+
+static const size_t TRACEMOD_POLYMUL_CUTOFF = MINISKETCH_TRACEMOD_POLYMUL_CUTOFF;
+static const size_t TRACEMOD_TABLE_CUTOFF = MINISKETCH_TRACEMOD_TABLE_CUTOFF;
+static const size_t TRACEMOD_FFT_TABLE_CUTOFF = MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF;
+static const size_t TRACEMOD_FFT_CUTOFF = MINISKETCH_TRACEMOD_FFT_CUTOFF;
+static const size_t FAST_DIVMOD_CUTOFF = MINISKETCH_FAST_DIVMOD_CUTOFF;
+static const size_t HGCD_CUTOFF = MINISKETCH_HGCD_CUTOFF;
+static const size_t HGCD_ITER_CROSSOVER = MINISKETCH_HGCD_ITER_CROSSOVER;
+
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
 void PolyMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::Elem>& val, const F& field) {
