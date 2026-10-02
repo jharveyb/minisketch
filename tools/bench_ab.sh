@@ -33,6 +33,16 @@
 #              (default "1024 1024 7 64|2048 2048 5 64|4096 4096 3 64")
 #   RUNS       rounds per configuration (default 5)
 #   NOISE_PCT  spread percentage above which a row is flagged (default 3)
+#   CXXFLAGS_A, CXXFLAGS_B
+#              extra compiler flags for one side, appended to -g -O2. With
+#              both refs '.', this A/Bs a build-time knob within one tree,
+#              e.g. CXXFLAGS_B=-DMINISKETCH_HGCD_CUTOFF=2048 tools/bench_ab.sh . .
+#   FIELDS     restrict the build to these field sizes (MINISKETCH_FIELDS,
+#              ';'-separated, e.g. "32;64"); must cover every bits value in
+#              CONFIGS. Cuts build time several-fold on slow machines.
+#   BENCH_PREFIX
+#              command prefixed to every bench run, e.g. "taskset -c 5" to
+#              pin to one core on a big.LITTLE CPU (word-split)
 
 set -euo pipefail
 
@@ -42,6 +52,10 @@ REF_B="${2:-HEAD}"
 CONFIGS="${CONFIGS:-32 32 7 64| 128 128 7 64| 512 512 7 64| 1024 1024 7 64|2048 2048 5 64|4096 4096 3 64}"
 RUNS="${RUNS:-5}"
 NOISE_PCT="${NOISE_PCT:-3}"
+CXXFLAGS_A="${CXXFLAGS_A:-}"
+CXXFLAGS_B="${CXXFLAGS_B:-}"
+FIELDS="${FIELDS:-}"
+read -ra BENCH_PREFIX_ARGS <<< "${BENCH_PREFIX:-}"
 
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/minisketch-bench-ab.XXXXXX")"
 WORKTREES=()
@@ -57,7 +71,9 @@ trap cleanup EXIT
 # (including cmake's stderr summary and compiler warnings) goes to a log,
 # shown only on failure.
 build_side() {
-    local ref="$1" dir="$ROOT/$2" src="." log="$ROOT/$2-build.log"
+    local ref="$1" dir="$ROOT/$2" src="." log="$ROOT/$2-build.log" extra="$3"
+    local fields_arg=()
+    [ -n "$FIELDS" ] && fields_arg=("-DMINISKETCH_FIELDS=$FIELDS")
     if [ "$ref" != "." ]; then
         git worktree add --force --detach "$dir-src" "$ref" > /dev/null 2>&1
         WORKTREES+=("$dir-src")
@@ -66,7 +82,7 @@ build_side() {
     if ! {
         cmake -S "$src" -B "$dir" \
             -DMINISKETCH_BUILD_TESTS=OFF -DMINISKETCH_BUILD_BENCHMARK=ON \
-            -DCMAKE_CXX_FLAGS="-g -O2" &&
+            "${fields_arg[@]}" -DCMAKE_CXX_FLAGS="-g -O2 $extra" &&
         cmake --build "$dir" --target bench -j "$(nproc)"
     } > "$log" 2>&1; then
         cat "$log" >&2
@@ -80,9 +96,9 @@ build_side() {
 run_bench() {
     local style="$1" bin="$2" syn="$3" err="$4" it="$5" bits="$6"
     if [ "$style" = flags ]; then
-        "$bin" --syndromes "$syn" --errors "$err" --iters "$it" --bits "$bits" --decode-only
+        "${BENCH_PREFIX_ARGS[@]}" "$bin" --syndromes "$syn" --errors "$err" --iters "$it" --bits "$bits" --decode-only
     else
-        "$bin" "$syn" "$err" "$it" "$bits"
+        "${BENCH_PREFIX_ARGS[@]}" "$bin" "$syn" "$err" "$it" "$bits"
     fi
 }
 
@@ -108,10 +124,10 @@ probe_side() {
     exit 1
 }
 
-echo "Building A: $REF_A"
-BIN_A=$(build_side "$REF_A" a)
-echo "Building B: $REF_B"
-BIN_B=$(build_side "$REF_B" b)
+echo "Building A: $REF_A${CXXFLAGS_A:+ ($CXXFLAGS_A)}"
+BIN_A=$(build_side "$REF_A" a "$CXXFLAGS_A")
+echo "Building B: $REF_B${CXXFLAGS_B:+ ($CXXFLAGS_B)}"
+BIN_B=$(build_side "$REF_B" b "$CXXFLAGS_B")
 STYLE_A=$(probe_side "$REF_A" "$BIN_A")
 STYLE_B=$(probe_side "$REF_B" "$BIN_B")
 echo "Measuring: $RUNS alternating rounds per config; keep the machine idle."

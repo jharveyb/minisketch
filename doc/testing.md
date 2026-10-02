@@ -384,6 +384,21 @@ tools/bench_ab.sh master .                        # current tree vs master
 CONFIGS="4096 4096 3 64" RUNS=7 tools/bench_ab.sh <ref> .
 ```
 
+Environment knobs besides `CONFIGS`/`RUNS`/`NOISE_PCT`:
+
+- `CXXFLAGS_A` / `CXXFLAGS_B` append compiler flags to one side. The
+  algorithm cutoffs in `src/sketch_impl.h` are overridable as
+  `-DMINISKETCH_<NAME>=<value>` (`TRACEMOD_POLYMUL_CUTOFF`,
+  `TRACEMOD_TABLE_CUTOFF`, `TRACEMOD_FFT_TABLE_CUTOFF`,
+  `TRACEMOD_FFT_CUTOFF`, `FAST_DIVMOD_CUTOFF`, `HGCD_CUTOFF`,
+  `HGCD_ITER_CROSSOVER`), so a cutoff is tuned with the same protocol by
+  benchmarking the tree against itself:
+  `CXXFLAGS_B=-DMINISKETCH_HGCD_CUTOFF=2048 tools/bench_ab.sh . .`
+- `FIELDS="32;64"` builds only those field sizes (must cover the `bits` of
+  every config row) — several times faster builds on slow ARM boards.
+- `BENCH_PREFIX="taskset -c 5"` prefixes every bench run, e.g. to pin to a
+  big core on a big.LITTLE CPU.
+
 Protocol rules, learned the hard way:
 
 - **Quiet machine.** No builds, indexing, or other load during measurement:
