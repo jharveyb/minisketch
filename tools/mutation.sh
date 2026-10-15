@@ -20,8 +20,11 @@
 # Scope/mutators live in mull.yml.
 #
 # Environment:
+#   MULL_PLUGIN    path to mull-ir-frontend-<N>; set by the nix devshell
+#                  (flake.nix), whose clang++ is the version-matched one
+#                  (mull.llvmPackages). Unset: look for a system install.
 #   MULL_VERSION   LLVM major version of the mull install (default: 21,
-#                  matching this machine's clang)
+#                  matching this machine's clang; derived from MULL_PLUGIN)
 #   MULL_DIFF_REF  if set, only lines changed since this git ref are mutated
 #                  (fast per-change runs; writes a derived config)
 #   CTEST_FIELDS   semicolon-separated field sizes to build (default 11;32)
@@ -30,20 +33,33 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 BUILD_DIR="${1:-build-mull}"
+if [ -n "${MULL_PLUGIN:-}" ]; then
+    MULL_VERSION="${MULL_PLUGIN##*-}"
+fi
 MULL_VERSION="${MULL_VERSION:-21}"
 CTEST_FIELDS="${CTEST_FIELDS:-11;32}"
 
 RUNNER="mull-runner-$MULL_VERSION"
 PLUGIN=""
-for candidate in "/usr/lib/mull-ir-frontend-$MULL_VERSION" "/usr/local/lib/mull-ir-frontend-$MULL_VERSION"; do
-    [ -e "$candidate" ] && PLUGIN="$candidate"
-done
+MULL_CXX="/usr/bin/clang++-$MULL_VERSION"
+if [ -n "${MULL_PLUGIN:-}" ]; then
+    # nix devshell: plugin and clang++ both come from mull.llvmPackages.
+    [ -e "$MULL_PLUGIN" ] && PLUGIN="$MULL_PLUGIN"
+    MULL_CXX="$(command -v clang++ || true)"
+else
+    for candidate in "/usr/lib/mull-ir-frontend-$MULL_VERSION" "/usr/local/lib/mull-ir-frontend-$MULL_VERSION"; do
+        [ -e "$candidate" ] && PLUGIN="$candidate"
+    done
+fi
 
 if ! command -v "$RUNNER" > /dev/null || [ -z "$PLUGIN" ]; then
     cat >&2 << EOF
 error: Mull is not installed ($RUNNER and/or mull-ir-frontend-$MULL_VERSION not found).
 
 Install options (the version suffix must match the clang used for the build):
+
+ 0. Enter the nix devshell (direnv, or 'nix develop'): it provides mull,
+    \$MULL_PLUGIN and the matching clang++.
 
  1. Prebuilt package (targets Ubuntu 22.04/24.04; may not fit this Debian):
       curl -1sLf 'https://dl.cloudsmith.io/public/mull-project/mull-stable/setup.deb.sh' | sudo -E bash
@@ -73,18 +89,23 @@ if [ -n "${MULL_DIFF_REF:-}" ]; then
     } > "$CONFIG"
 fi
 
-# clang++-$MULL_VERSION directly (not the ccache shim): the plugin must run
+# The version-matched clang++ directly (not the ccache shim): the plugin must run
 # on every TU and its output must never be served stale from a cache that
 # does not key on mull.yml.
 MULL_CONFIG="$CONFIG" cmake -B "$BUILD_DIR" \
     -DMINISKETCH_BUILD_TESTS=ON \
-    -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$MULL_VERSION" \
+    -DCMAKE_CXX_COMPILER="$MULL_CXX" \
     -DCMAKE_CXX_FLAGS="-fpass-plugin=$PLUGIN -g -grecord-command-line -O1" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     -DMINISKETCH_FIELDS="$CTEST_FIELDS"
 MULL_CONFIG="$CONFIG" cmake --build "$BUILD_DIR" --target unit-tests -j "$(nproc)"
 
-MULL_CONFIG="$CONFIG" "$RUNNER" \
+# Run the mutants under a minimal environment: every mutation point calls
+# getenv() each time it executes (Mull 0.34), a linear scan of the
+# environment. A nix devshell exports ~140 variables / 30 KB, which made the
+# instrumented unit-tests ~10x slower (425s vs 40s for 11;32), enough for the
+# warm-up run alone to blow mull.yml's timeout.
+env -i HOME="$HOME" PATH="$PATH" MULL_CONFIG="$CONFIG" "$RUNNER" \
     -reporters IDE -reporters SQLite -report-dir "$BUILD_DIR" -report-name mutation \
     "$BUILD_DIR/bin/unit-tests"
 
