@@ -50,3 +50,8 @@ __pycache__/
 # bare 'coz run' drops the profile in the cwd).
 profile.jsonl
 *.coz
+
+# Nix / direnv (the blanket ".*" rule above would otherwise hide .envrc).
+!/.envrc
+/.direnv/
+/result*
