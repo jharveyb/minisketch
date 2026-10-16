@@ -50,9 +50,14 @@
 #ifndef MINISKETCH_BM_VERIFY_MIN_PREFIX
 #define MINISKETCH_BM_VERIFY_MIN_PREFIX 0
 #endif
-/* Minimum LFSR length for the additive-FFT tail verification. */
+/* Minimum LFSR length for the additive-FFT tail verification, for fields
+ * with a cheap scalar Multiplier (CLMUL) and with a table-based one
+ * (generic, whose pointwise FFT products are slow one-off multiplications). */
 #ifndef MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE
 #define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE 24
+#endif
+#ifndef MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE
+#define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE 40
 #endif
 /* Root finding via the Frobenius orbit of the root polynomial (TraceOrbit):
  * engaged for root degrees >= MIN_DEGREE; precomputes the traces of the
@@ -82,6 +87,7 @@ static const size_t BM_VERIFY_GAP = MINISKETCH_BM_VERIFY_GAP;
 static const size_t BM_VERIFY_MIN_PREFIX = MINISKETCH_BM_VERIFY_MIN_PREFIX;
 static const size_t BM_VERIFY_MIN_TAIL = MINISKETCH_BM_VERIFY_MIN_TAIL;
 static const size_t BM_VERIFY_FFT_MIN_DEGREE = MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE;
+static const size_t BM_VERIFY_FFT_MIN_DEGREE_TABLE = MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE;
 static const size_t ORBIT_MIN_DEGREE = MINISKETCH_ORBIT_MIN_DEGREE;
 static const size_t ORBIT_EXTRA_DEPTHS = MINISKETCH_ORBIT_EXTRA_DEPTHS;
 static const size_t ORBIT_NODE_FACTOR = MINISKETCH_ORBIT_NODE_FACTOR;
@@ -1199,7 +1205,10 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
         for (int b = field.Bits(); b > 1; b >>= 1) ++depths;
         depths = std::min<size_t>(depths, field.Bits());
         std::vector<std::vector<typename F::Elem>> traces;
-        if (!ComputeTraceOrbit(poly, basis, depths, field, traces)) return {};
+        MINISKETCH_COZ_BEGIN("findroots-orbit");
+        bool split = ComputeTraceOrbit(poly, basis, depths, field, traces);
+        MINISKETCH_COZ_END("findroots-orbit");
+        if (!split) return {};
         if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, poly.size() - 1)) return {};
         CHECK_RETURN(poly.size() - 1 == roots.size(), {});
         return roots;
@@ -1246,7 +1255,7 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
     const size_t le = conn_e.size(), lo = conn_o.size();
     int fft_m = 0;
     size_t block;
-    if (TraceModFFTCapable(field) && L >= BM_VERIFY_FFT_MIN_DEGREE) {
+    if (TraceModFFTCapable(field) && L >= (TraceModCheapScalarMul<F>() ? BM_VERIFY_FFT_MIN_DEGREE : BM_VERIFY_FFT_MIN_DEGREE_TABLE)) {
         // Window length B+W plus the operand length must fit the transform
         // without wraparound; 2^fft_m >= 4*le keeps at least ~3/4 of every
         // transform useful.

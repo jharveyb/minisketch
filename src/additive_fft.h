@@ -7,6 +7,7 @@
 #ifndef _MINISKETCH_ADDITIVE_FFT_H_
 #define _MINISKETCH_ADDITIVE_FFT_H_
 
+#include <algorithm>
 #include <vector>
 
 #include "util.h"
@@ -79,6 +80,16 @@ public:
             for (size_t i = 0; i < half; ++i) twiddle.push_back(twiddle[i] ^ beta[s + 1]);
             ++s;
         }
+        // Twiddle i serves one block per round at every transform size, so
+        // for table-based Multipliers (the generic fields: a table build
+        // costs far more than a multiplication) the tables of the low
+        // indices - the large blocks of the early rounds - are built once
+        // here instead of once per block per transform. Element-wrapper
+        // Multipliers (CLMUL) gain nothing from this.
+        if (sizeof(typename F::Multiplier) > 2 * sizeof(Elem)) {
+            size_t want = std::min(twiddle.size(), TW_MUL_CACHE);
+            while (tw_mul.size() < want) tw_mul.emplace_back(field, twiddle[tw_mul.size()]);
+        }
         max_t = t;
     }
 
@@ -109,6 +120,14 @@ public:
                         Elem c = f[k];
                         if (c == 0) continue;
                         for (size_t z : zs) f[k - z] ^= c;
+                    }
+                } else if (i < tw_mul.size()) {
+                    const typename F::Multiplier& mul = tw_mul[i];
+                    for (size_t k = off + 2 * h; k-- > off + h; ) {
+                        Elem c = f[k];
+                        if (c == 0) continue;
+                        for (size_t z : zs) f[k - z] ^= c;
+                        f[k - h] ^= mul(c);
                     }
                 } else if (h >= 4) {
                     typename F::Multiplier mul(field, tw);
@@ -153,6 +172,14 @@ public:
                         Elem c = f[k];
                         if (c == 0) continue;
                         for (size_t z : zs) f[k - z] ^= c;
+                    }
+                } else if (i < tw_mul.size()) {
+                    const typename F::Multiplier& mul = tw_mul[i];
+                    for (size_t k = off + h; k < off + 2 * h; ++k) {
+                        Elem c = f[k];
+                        if (c == 0) continue;
+                        for (size_t z : zs) f[k - z] ^= c;
+                        f[k - h] ^= mul(c);
                     }
                 } else if (h >= 4) {
                     typename F::Multiplier mul(field, tw);
@@ -265,6 +292,9 @@ private:
     std::vector<Elem> twiddle;              //!< twiddle[i] = XOR of beta[j+1] over set bits j of i; size 2^(max_t-1).
     std::vector<std::vector<size_t>> zeta;  //!< Per-dimension sparse offsets of the vanishing polynomials.
     std::vector<Elem> buf_a, buf_b;         //!< Transform buffers, reused across calls.
+    /** Cached Multipliers for twiddle[0..TW_MUL_CACHE) (table-based fields only). */
+    static const size_t TW_MUL_CACHE = 64;
+    std::vector<typename F::Multiplier> tw_mul;
     int max_t = 0;
 };
 
