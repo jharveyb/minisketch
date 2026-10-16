@@ -25,5 +25,8 @@
         "repo": "ast-grep/agent-skill"
       }
     }
+  },
+  "attribution": {
+    "sessionUrl": false
   }
 }
