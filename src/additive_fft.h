@@ -87,7 +87,7 @@ public:
         // here instead of once per block per transform. Element-wrapper
         // Multipliers (CLMUL) gain nothing from this.
         if (sizeof(typename F::Multiplier) > 2 * sizeof(Elem)) {
-            size_t want = std::min(twiddle.size(), TW_MUL_CACHE);
+            size_t want = std::min(twiddle.size(), size_t(TW_MUL_CACHE));
             while (tw_mul.size() < want) tw_mul.emplace_back(field, twiddle[tw_mul.size()]);
         }
         max_t = t;
