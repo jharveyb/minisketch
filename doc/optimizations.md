@@ -922,6 +922,11 @@ reusing the carry's buffers measured no difference on x86-64.
   coefficient-step at block sizes where the block simulation stays cheap.
   It pays only in a full divide-and-conquer form with fast products, where
   the half-gcd's constants apply.
+* **Fused Berlekamp–Massey update.** Accumulating the next odd step's
+  discrepancy in the same pass that writes the updated polynomial (one
+  pass over it per step instead of two) measured no gain on x86-64
+  (−2% for the 32-bit field). The loop is bound by its carry-less
+  products, not its memory traffic.
 * **Peeling splits (analysis).** The gcd work telescopes:
   Σ(n<sub>parent</sub>² − n<sub>gcd</sub>²) over the gcds computed. So
   extracting large gcds (small complements by coset division) could cut it
