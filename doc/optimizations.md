@@ -849,15 +849,48 @@ i7-4770 at 3.4 GHz, Pi 5 at 2.4 GHz), interleaved, min of 7 rounds,
 CLMUL/PMULL implementation unless noted; starting point: the 2026-10
 "Frobenius-structured BM, shared trace orbit, lazy reduction" series.
 
-RESULTS_TABLE
+| capacity/differences | i7-4770 | Pi 5 (A76) |
+|---|---|---|
+| 1024/512 (50%) | 9.06 → 4.38 ms (2.07×) | 10.03 → 6.12 ms (1.64×) |
+| 1024/768 (75%) | 19.31 → 8.29 ms (2.33×) | 28.16 → 11.58 ms (2.43×) |
+| 1024/1024 (100%) | 23.98 → 10.20 ms (2.35×) | 34.38 → 14.23 ms (2.42×) |
+| 2048/1024 (50%) | 24.68 → 11.30 ms (2.18×) | 35.56 → 15.60 ms (2.28×) |
+| 2048/1536 (75%) | 50.92 → 21.48 ms (2.37×) | 72.72 → 30.20 ms (2.41×) |
+| 2048/2048 (100%) | 67.54 → 29.59 ms (2.28×) | 94.27 → 40.02 ms (2.36×) |
+| 4096/2048 (50%) | 69.40 → 30.50 ms (2.28×) | 97.01 → 42.23 ms (2.30×) |
+| 4096/3072 (75%) | 144.5 → 59.6 ms (2.42×) | 202.1 → 83.4 ms (2.42×) |
+| 4096/4096 (100%) | 203.3 → 88.8 ms (2.29×) | 281.0 → 121.9 ms (2.31×) |
+| 32-bit 1024/768 | 12.58 → 8.72 ms (1.44×) | 13.04 → 7.90 ms (1.65×) |
+| 32-bit 2048/1536 | 36.06 → 23.58 ms (1.53×) | 36.51 → 20.97 ms (1.74×) |
+| 32-bit 2048/2048 | 52.16 → 33.37 ms (1.56×) | 51.91 → 28.71 ms (1.81×) |
+| 1024/256 (25%) | 2.49 → 1.67 ms (1.49×) | 2.79 → 2.30 ms (1.22×) |
+| 1024/102, 2048/204 (10%) | 1.00–1.02× | 1.09–1.12× |
+| 1024/32, 1024/64, 4096/64 | 1.02–1.04× | 1.07–1.11× |
+| 32-bit 1024/64 | 0.98× | 0.99× |
+| generic 1024/768 (64-, 32-bit) | 1.01× | 1.05× |
+| 1024/1100, 4096/4200 (over capacity: fail) | 3.20×, 2.25× | 3.40×, 2.35× |
+
+The 32-bit field gains less: its chain is half as long, so the quadratic
+stages (BM and the splits' BMs, the small nodes' gcds), which this series
+changes least, are a larger share. Raw data:
+`doc/benchmark_results/high_fill/`.
 
 Peak heap of one decode (instrumented `operator new`, 64-bit / 32-bit
 field) is lower everywhere: the d²/2 square table of the old orbit is
 gone, and the coset vectors are O(N) per tree level.
 
-MEMORY_TABLE
+| capacity/differences | 64-bit | 32-bit |
+|---|---|---|
+| 1024/256 | 340 → 99 KB | 185 → 51 KB |
+| 1024/512 | 1183 → 173 KB | 622 → 103 KB |
+| 1024/768 | 358 → 289 KB | 225 → 168 KB |
+| 1024/1024 | 446 → 365 KB | 284 → 193 KB |
+| 2048/1536 | 710 → 574 KB | 446 → 335 KB |
+| 4096/3072 | 1414 → 1140 KB | 888 → 669 KB |
+| 4096/4096 | 1766 → 1311 KB | 1124 → 729 KB |
 
-Allocation counts per decode roughly doubled (per-node coset vectors).
+Allocation counts per decode roughly doubled (per-node coset vectors);
+reusing the carry's buffers measured no difference on x86-64.
 
 ### Measured negative results in this series
 

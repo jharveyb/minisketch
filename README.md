@@ -231,6 +231,7 @@ Specific algorithms and optimizations used:
 * Two different precomputation approaches for efficient reduction mod a polynomial in the BTA computation of the trace.
 * The Frobenius orbit needed for the trace is computed once, for the whole polynomial, and shared by the top levels of the root-finding recursion (with split parameters chosen from a subfield tower basis so the shared traces are cheap to combine).
 * On CLMUL/PMULL hardware, sums of products are accumulated unreduced and reduced once (lazy reduction), in the trace, Berlekamp-Massey, division and GCD loops.
+* For large polynomials (degree ≥ 224, i.e. large and fairly full sketches) on CLMUL/PMULL hardware, root finding works in Montgomery form on cosets of an additive-FFT evaluation subspace: a modular squaring is two transforms (the reduction's 0/0 is resolved by a formal derivative), relative traces to GF(16) are carried down the root-finding tree by coset halving, and large nodes split by running Berlekamp-Massey on the power sums of one side (derived from the sketch itself) instead of computing a GCD. See [doc/optimizations.md](doc/optimizations.md).
 
 See [doc/optimizations.md](doc/optimizations.md) for the decode cost model, notes on
 the optimizations above, and analysis of the deferred ideas below.

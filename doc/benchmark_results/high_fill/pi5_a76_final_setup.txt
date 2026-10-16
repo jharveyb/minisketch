@@ -1,0 +1,9 @@
+Recorded current settings to /var/tmp/minisketch-bench-host.state
+
+fastest CPUs (pinned at 2400000 kHz): 0,1,2,3 -> BENCH_PREFIX="taskset -c 3"
+boost: not supported
+cpus 0,1,2,3: governor performance, min 2400000 kHz, max 2400000 kHz
+vcgencmd: throttled=0x0 temp=49.4'C
+
+Host pinned.
+After benchmarking: sudo h538c/tools/bench_host.sh restore
