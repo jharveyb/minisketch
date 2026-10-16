@@ -1433,7 +1433,7 @@ public:
         if (!square) Derivative(v, da);
         for (size_t j = 0; j < n; ++j) v[j] = field.Mul(v[j], inv_ga[j]);
         Derivative(v, q);
-        for (size_t j = 0; j < n; ++j) v[j] = field.Mul(q[j], ga[j]) ^ field.Mul(v[j], dga[j]);
+        for (size_t j = 0; j < n; ++j) v[j] = field.Reduce(field.WideXor(field.MulWide(q[j], ga[j]), field.MulWide(v[j], dga[j])));
         if (!square) {
             for (size_t j = 0; j < n; ++j) v[j] ^= da[j];
         }
