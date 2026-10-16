@@ -599,6 +599,41 @@ end of the series, all commits included.
 | generic 1024/64 | 3.93 → 1.96 ms (2.0×) | 5.85 → 2.70 ms (2.2×) |
 | generic 4096/64 | 9.56 → 2.92 ms (3.3×) | 12.76 → 4.18 ms (3.1×) |
 
+Fuller sketches (50–100% of capacity) gain less: the BM tail is short
+and the root degree reaches the FFT reducer (≥ 704). Same protocol:
+
+| capacity/differences | i7-4770 CLMUL | Pi 5 (A76) PMULL |
+|---|---|---|
+| 1024/512 (50%) | 22.1 → 7.9 ms (2.8×) | 40.0 → 10.0 ms (4.0×) |
+| 1024/768 (75%) | 44.7 → 17.0 ms (2.6×) | 82.1 → 28.3 ms (2.9×) |
+| 2048/1024 (50%) | 71.1 → 21.6 ms (3.3×) | 129.4 → 35.7 ms (3.6×) |
+| 2048/1536 (75%) | 124.5 → 44.3 ms (2.8×) | 225.2 → 72.6 ms (3.1×) |
+| 4096/2048 (50%) | 201.7 → 60.4 ms (3.3×) | 366.5 → 97.2 ms (3.8×) |
+| 4096/3072 (75%) | 335.8 → 126.0 ms (2.7×) | 600.5 → 202.4 ms (3.0×) |
+| 4096/4096 (100%) | 504.5 → 177.1 ms (2.8×) | 881.4 → 279.0 ms (3.2×) |
+| 32-bit 1024/768 (75%) | 30.1 → 11.0 ms (2.7×) | 28.8 → 13.1 ms (2.2×) |
+| generic 1024/768 (75%) | 208.7 → 117.5 ms (1.8×) | 339.5 → 195.7 ms (1.7×) |
+
+**Memory.** Peak heap during one decode (global `operator new`
+instrumented, 64-bit field), before → after:
+
+| capacity/differences | CLMUL | generic |
+|---|---|---|
+| 1024/32 | 57 → 27 KB | 4.2 MB → 236 KB |
+| 1024/256 | 107 → 349 KB | 4.2 → 1.3 MB |
+| 1024/512 | 299 KB → 1.21 MB | 4.2 → 2.4 MB |
+| 1024/1024 | 333 → 458 KB | 4.2 → 4.3 MB |
+| 4096/64 | 229 → 109 KB | 16.9 MB → 574 KB |
+| 4096/4096 | 1.37 → 1.81 MB | — |
+
+The old BM built a 2 KB Multiplier table per syndrome on the generic
+fields; it now builds them only for the walked prefix, in a deque. CLMUL
+decodes with root degree in [256, 704) keep the square table (d²/2
+elements, ~2 MB at the top of that range) that the raised table/FFT
+crossover uses there instead of the FFT reducer. That is the one real
+memory cost of the series, traded for speed on the small-cache machines.
+Allocation counts per decode dropped 1.2–4× throughout.
+
 Failed decodes (more differences than capacity) got faster too, from the
 exact root-level factorizability test. On the i7, capacity 1024 with 1100
 differences went 28.4 → 12.6 ms, and capacity 4096 with 4200 went
