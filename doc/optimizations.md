@@ -454,15 +454,23 @@ s<sub>k</sub>² (equivalently S(x)² = S<sub>even</sub>(x)). Two consequences:
   rejecting a sketch with more than `max_count` differences, since a
   failed check just resumes the iteration.
 
+* **The tail only needs the sketch itself.** With C = ΛS the same
+  structure gives Λ·C = C² + Λ²·S<sub>odd</sub>. Past the prefix, C
+  vanishes on the tail iff the raw sketch values (the odd syndromes
+  u<sub>j</sub> = s<sub>2j+1</sub> = Σζ·(ζ²)<sup>j</sup>) satisfy the
+  recurrence whose connection polynomial is Λ with each coefficient
+  squared (roots squared). So decode no longer reconstructs all 2c
+  syndromes (`BerlekampMasseyOdd` derives s<sub>2k</sub> = s<sub>k</sub>²
+  only for the prefix it walks), and the tail check reads half the memory.
+
 The tail check (`BerlekampMasseyVerifyTail`) has two tiers:
-* **FFT.** Split by parity, the constraints are coefficients of
-  Λ<sub>e</sub>S<sub>e</sub> + xΛ<sub>o</sub>S<sub>o</sub> (in y = x²): two
-  half-size products per block. The additive FFT prepares Λ's halves once
-  and sums both products in the evaluation domain, so each block costs one
-  inverse transform.
+* **FFT.** One product per block of the squared Λ with a window of u,
+  with Λ²'s transform prepared once: two transforms per block.
 * **Direct.** On lazily-reducing fields, a direct check costs one
   carry-less product per term, has no serial dependency, and shares each
-  coefficient load across 4 positions. It is faster up to L ≈ 192.
+  coefficient load across 4 positions. It is faster up to L ≈ 192 (on the
+  i7 the FFT already wins from L ≈ 128; on the Pi the direct check is
+  ahead through 192).
 
 BM goes from a serial O(c·n) to O(n²) + O(c·n) independent products, and
 it builds Multipliers only for the processed prefix. On the generic
@@ -485,6 +493,17 @@ for the first log₂m+2 depths on the fly. Only those accumulators stay live,
 not the m orbit elements. A node of degree d<sub>g</sub> with
 2·deg f ≤ d<sub>g</sub>·m then needs a single division instead of a
 reducer build plus m−1 squarings; smaller nodes keep the old path.
+
+**Tower-basis split parameters.** The split parameters only need to be
+GF(2)-linearly independent. When 8 divides m they are
+β<sub>8l+j</sub> = basis·x<sup>l</sup>·z<sup>j</sup>, with z generating the
+subfield GF(2⁸), found via the relative trace. For the first eight
+depths β<sub>k</sub> = basis·z<sup>k</sup>, and (z<sup>k</sup>)<sup>2<sup>i</sup></sup>
+depends only on i mod 8. So the chain feeds eight residue buckets
+Z<sub>r</sub> = Σ<sub>i≡r</sub> basis<sup>2<sup>i</sup></sup>X<sub>i</sub>,
+and each depth's trace is Σ<sub>r</sub>(z<sup>k</sup>)<sup>2<sup>r</sup></sup>Z<sub>r</sub>.
+That is (m + 8·depths)·d products instead of m·depths·d, i.e. 128·d
+instead of 512·d at m = 64, and gives +11–14% at n = 16…64.
 
 One more squaring gives x<sup>2<sup>m</sup></sup> mod f, which equals x
 iff f is square-free and splits completely. That is an **exact
@@ -567,6 +586,12 @@ Stage split at 1024/256 on the i7 afterwards: the root chain is ~50%,
 node divisions ~14%, inversions ~6%, orbit accumulation and reducer
 construction ~5% each, BM ~6%.
 
+Later commits in the series, measured against the preceding commit on
+i7-4770 / Pi 5:
+* Tower basis: 1024/32 +12% / +12%, 1024/64 +11% / +7%.
+* Odd-syndrome BM: 4096/16 +27% / +45%, 4096/32 +14% / +28%,
+  8192/64 +9% / +24%.
+
 ### Measured negative results in this series
 
 * **Lazy-Karatsuba reciprocal reducer for the chain.** The Frobenius-sparse
@@ -583,6 +608,26 @@ construction ~5% each, BM ~6%.
   1024/256 on the Pi, 22.0 vs 15.1 ms for the table.
 * **Orbit node-factor / depth retune** after the lazy division: flat
   within ±3%.
+* **Operand order for SSE PCLMULQDQ** (put the loop-invariant operand
+  second, to avoid a register copy per product without VEX encoding): no
+  measurable effect. The copies are eliminated at register rename; their
+  apparent cost in `perf annotate` was skid.
+
+### Probabilistic tail verification (not implemented: changes guarantees)
+
+At high capacity and small n the exact O(c·n) (or O(c log n)) tail check
+is a large share of decode: about half at 4096/32 before the odd-syndrome
+change. A **secret random linear combination** of the tail constraints,
+Σ<sub>k</sub> r<sup>k</sup>c<sub>k</sub> = Σ<sub>i</sub> Λ<sub>i</sub>r<sup>i</sup>(P(N−i) − P(t−i))
+with prefix sums P(j) = Σ<sub>j'<j</sub> r<sup>j'</sup>s<sub>j'</sub>,
+costs O(c + n), roughly 2× decode at 4096/32. But it accepts a sketch
+whose tail does not match with probability up to N/2<sup>m</sup> per
+random r (Schwartz–Zippel): ~2<sup>−51</sup> at m = 64, but 2<sup>−19</sup>
+at m = 32. That weakens the decoder's guarantee against adversarially
+built overfull sketches (low-weight BCH codewords make prefix-only
+matches constructible), so it would need an explicit API-level opt-in
+and several rounds for small fields. Exact verification is Ω(c log n)-ish
+(it is a polynomial product), so this is the only route to O(c).
 
 ### Remaining in this area
 
