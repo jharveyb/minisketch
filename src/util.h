@@ -34,6 +34,29 @@
 #include <coz.h>
 #define MINISKETCH_COZ_BEGIN(name) COZ_BEGIN(name)
 #define MINISKETCH_COZ_END(name) COZ_END(name)
+#elif defined(MINISKETCH_STAGE_TIMING)
+/* Development aid: accumulate wall time per marker name and print the totals
+ * to stderr at exit. Not thread-safe; for single-threaded benchmark runs. */
+#include <chrono>
+#include <cstdio>
+#include <map>
+#include <string>
+struct MinisketchStageTimes {
+    std::map<std::string, std::pair<double, unsigned long>> totals;
+    std::map<std::string, std::chrono::steady_clock::time_point> open;
+    ~MinisketchStageTimes() {
+        for (const auto& t : totals) fprintf(stderr, "stage\t%s\t%.3f ms\t%lu calls\n", t.first.c_str(), t.second.first * 1e3, t.second.second);
+    }
+    static MinisketchStageTimes& Get() { static MinisketchStageTimes t; return t; }
+    void Begin(const char* n) { open[n] = std::chrono::steady_clock::now(); }
+    void End(const char* n) {
+        auto& t = totals[n];
+        t.first += std::chrono::duration<double>(std::chrono::steady_clock::now() - open[n]).count();
+        ++t.second;
+    }
+};
+#define MINISKETCH_COZ_BEGIN(name) MinisketchStageTimes::Get().Begin(name)
+#define MINISKETCH_COZ_END(name) MinisketchStageTimes::Get().End(name)
 #else
 #define MINISKETCH_COZ_BEGIN(name)
 #define MINISKETCH_COZ_END(name)
