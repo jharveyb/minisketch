@@ -116,7 +116,7 @@
 /* Node degree from which Montgomery-form nodes split by power sums
  * (PowerSumSplit) instead of a gcd when the power sums are known. */
 #ifndef MINISKETCH_PSUM_SPLIT_MIN
-#define MINISKETCH_PSUM_SPLIT_MIN 128
+#define MINISKETCH_PSUM_SPLIT_MIN 256
 #endif
 #ifndef MINISKETCH_MONT_NORMALIZE_MIN
 #define MINISKETCH_MONT_NORMALIZE_MIN 512
