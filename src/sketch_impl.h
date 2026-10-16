@@ -77,7 +77,7 @@
  * first log2(Bits) + EXTRA_DEPTHS split depths; a node of degree d uses them
  * when NODE_FACTOR * deg(root) <= d * Bits. */
 #ifndef MINISKETCH_ORBIT_MIN_DEGREE
-#define MINISKETCH_ORBIT_MIN_DEGREE 16
+#define MINISKETCH_ORBIT_MIN_DEGREE 8
 #endif
 #ifndef MINISKETCH_ORBIT_EXTRA_DEPTHS
 #define MINISKETCH_ORBIT_EXTRA_DEPTHS 2
