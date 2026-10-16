@@ -5,4 +5,4 @@ boost: 0
 cpus 0,1,2,3,4,5,6,7: governor performance, min 3400000 kHz, max 3400000 kHz, EPB 0
 
 Host pinned.
-After benchmarking: sudo h538c/tools/bench_host.sh restore
+After benchmarking: sudo h6c9a/tools/bench_host.sh restore

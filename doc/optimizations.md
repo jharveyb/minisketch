@@ -790,10 +790,14 @@ mod g: **s − 1 squarings** of a carried trace. The orbit accumulates
 T<sub>l</sub> for free (every s-th step). Carrying one trace to both
 children costs two full-size transforms while one squaring costs two per
 node, so a smaller subfield, which needs more carried traces but fewer squarings, wins.
-s = 4 (`MONT_TOWER_BITS`, four traces for 16 depths) beats s = 8 by 5–8% on
-the i7 and the Pi, and s = 2 is in between. 16 carried depths remove the
-63-squaring own traces of the deep small nodes (`SmallTrace`), which were
-4–10% of decode at high fill.
+s = 4 (`MONT_TOWER_BITS`, up to four traces for 16 depths) beats s = 8 by
+5–8% on the i7 and the Pi, and s = 2 is in between. Carrying traces down to
+the deep small nodes removes their 63-squaring own traces (`SmallTrace`),
+which were 4–10% of decode at high fill. Only the traces for the
+log₂N + 2 levels a degree-d tree reaches with nodes of degree ≥ 3 are
+carried (`CARRY_DEPTH_MARGIN`): three up to N = 2048. That is 0–6% faster
+than always carrying four, and the rare deeper node computes its own
+trace.
 
 **Small nodes.** Below degree 16 (`SMALL_CARRY_MAX`) the traces are
 carried in normal form (division by the factor, coefficient-domain
@@ -851,24 +855,24 @@ CLMUL/PMULL implementation unless noted; starting point: the 2026-10
 
 | capacity/differences | i7-4770 | Pi 5 (A76) |
 |---|---|---|
-| 1024/512 (50%) | 9.06 → 4.38 ms (2.07×) | 10.03 → 6.12 ms (1.64×) |
-| 1024/768 (75%) | 19.31 → 8.29 ms (2.33×) | 28.16 → 11.58 ms (2.43×) |
-| 1024/1024 (100%) | 23.98 → 10.20 ms (2.35×) | 34.38 → 14.23 ms (2.42×) |
-| 2048/1024 (50%) | 24.68 → 11.30 ms (2.18×) | 35.56 → 15.60 ms (2.28×) |
-| 2048/1536 (75%) | 50.92 → 21.48 ms (2.37×) | 72.72 → 30.20 ms (2.41×) |
-| 2048/2048 (100%) | 67.54 → 29.59 ms (2.28×) | 94.27 → 40.02 ms (2.36×) |
-| 4096/2048 (50%) | 69.40 → 30.50 ms (2.28×) | 97.01 → 42.23 ms (2.30×) |
-| 4096/3072 (75%) | 144.5 → 59.6 ms (2.42×) | 202.1 → 83.4 ms (2.42×) |
-| 4096/4096 (100%) | 203.3 → 88.8 ms (2.29×) | 281.0 → 121.9 ms (2.31×) |
-| 32-bit 1024/768 | 12.58 → 8.72 ms (1.44×) | 13.04 → 7.90 ms (1.65×) |
-| 32-bit 2048/1536 | 36.06 → 23.58 ms (1.53×) | 36.51 → 20.97 ms (1.74×) |
-| 32-bit 2048/2048 | 52.16 → 33.37 ms (1.56×) | 51.91 → 28.71 ms (1.81×) |
-| 1024/256 (25%) | 2.49 → 1.67 ms (1.49×) | 2.79 → 2.30 ms (1.22×) |
-| 1024/102, 2048/204 (10%) | 1.00–1.02× | 1.09–1.12× |
-| 1024/32, 1024/64, 4096/64 | 1.02–1.04× | 1.07–1.11× |
-| 32-bit 1024/64 | 0.98× | 0.99× |
-| generic 1024/768 (64-, 32-bit) | 1.01× | 1.05× |
-| 1024/1100, 4096/4200 (over capacity: fail) | 3.20×, 2.25× | 3.40×, 2.35× |
+| 1024/512 (50%) | 9.08 → 4.14 ms (2.19×) | 10.05 → 5.84 ms (1.72×) |
+| 1024/768 (75%) | 19.34 → 8.01 ms (2.42×) | 28.34 → 11.19 ms (2.53×) |
+| 1024/1024 (100%) | 23.94 → 10.12 ms (2.37×) | 34.43 → 14.02 ms (2.46×) |
+| 2048/1024 (50%) | 24.66 → 11.00 ms (2.24×) | 35.45 → 15.09 ms (2.35×) |
+| 2048/1536 (75%) | 50.85 → 21.44 ms (2.37×) | 72.49 → 30.19 ms (2.40×) |
+| 2048/2048 (100%) | 67.65 → 28.15 ms (2.40×) | 94.35 → 40.50 ms (2.33×) |
+| 4096/2048 (50%) | 69.35 → 30.46 ms (2.28×) | 96.75 → 42.58 ms (2.27×) |
+| 4096/3072 (75%) | 144.1 → 59.6 ms (2.42×) | 202.2 → 83.3 ms (2.43×) |
+| 4096/4096 (100%) | 203.5 → 87.1 ms (2.34×) | 279.3 → 123.2 ms (2.27×) |
+| 32-bit 1024/768 | 12.62 → 8.23 ms (1.53×) | 13.06 → 7.52 ms (1.74×) |
+| 32-bit 2048/1536 | 36.03 → 23.48 ms (1.53×) | 36.50 → 20.85 ms (1.75×) |
+| 32-bit 2048/2048 | 52.25 → 33.10 ms (1.58×) | 51.95 → 28.79 ms (1.80×) |
+| 1024/256 (25%) | 2.50 → 1.61 ms (1.55×) | 2.79 → 2.19 ms (1.27×) |
+| 1024/102, 2048/204 (10%) | 1.01× | 1.10–1.12× |
+| 1024/32, 1024/64, 4096/64 | 1.03× | 1.07–1.13× |
+| 32-bit 1024/64 | 0.99× | 0.98× |
+| generic 1024/768 (64-, 32-bit) | 1.01–1.02× | 1.05× |
+| 1024/1100, 4096/4200 (over capacity: fail) | 3.22×, 2.25× | 3.39×, 2.35× |
 
 The 32-bit field gains less: its chain is half as long, so the quadratic
 stages (BM and the splits' BMs, the small nodes' gcds), which this series
@@ -881,13 +885,13 @@ gone, and the coset vectors are O(N) per tree level.
 
 | capacity/differences | 64-bit | 32-bit |
 |---|---|---|
-| 1024/256 | 340 → 99 KB | 185 → 51 KB |
-| 1024/512 | 1183 → 173 KB | 622 → 103 KB |
-| 1024/768 | 358 → 289 KB | 225 → 168 KB |
-| 1024/1024 | 446 → 365 KB | 284 → 193 KB |
-| 2048/1536 | 710 → 574 KB | 446 → 335 KB |
-| 4096/3072 | 1414 → 1140 KB | 888 → 669 KB |
-| 4096/4096 | 1766 → 1311 KB | 1124 → 729 KB |
+| 1024/256 | 340 → 88 KB | 185 → 51 KB |
+| 1024/512 | 1183 → 180 KB | 622 → 97 KB |
+| 1024/768 | 358 → 263 KB | 225 → 148 KB |
+| 1024/1024 | 446 → 325 KB | 284 → 189 KB |
+| 2048/1536 | 710 → 573 KB | 446 → 335 KB |
+| 4096/3072 | 1414 → 1130 KB | 888 → 669 KB |
+| 4096/4096 | 1766 → 1458 KB | 1124 → 729 KB |
 
 Allocation counts per decode roughly doubled (per-node coset vectors);
 reusing the carry's buffers measured no difference on x86-64.
