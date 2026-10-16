@@ -36,6 +36,16 @@ public:
 
     Elem Mul(Elem a, Elem b) const { return GFMul<I, B, L, O>(a, b); }
 
+    /** Lazy-reduction interface (see the CLMUL GenField); trivial here, as
+     *  table-based multiplication produces reduced results directly. Callers
+     *  keep their Multiplier-based loops when LAZY_REDUCE is false. */
+    static constexpr bool LAZY_REDUCE = false;
+    typedef I Wide;
+    static inline Wide WideZero() { return 0; }
+    inline Wide MulWide(Elem a, Elem b) const { return Mul(a, b); }
+    static inline Wide WideXor(Wide a, Wide b) { return a ^ b; }
+    static inline Elem Reduce(Wide w) { return w; }
+
     /** Compute the square of a. */
     inline constexpr Elem Sqr(Elem a) const { return SQR->template Map<O>(a); }
 

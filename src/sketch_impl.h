@@ -26,7 +26,7 @@
 #define MINISKETCH_TRACEMOD_TABLE_CUTOFF 512
 #endif
 #ifndef MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF
-#define MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF 256
+#define MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF 448
 #endif
 #ifndef MINISKETCH_TRACEMOD_FFT_CUTOFF
 #define MINISKETCH_TRACEMOD_FFT_CUTOFF 128
@@ -183,6 +183,20 @@ void PolyMulLowNaive(const std::vector<typename F::Elem>& a, const std::vector<t
     typedef typename F::Elem Elem;
     out.assign(n, 0);
     size_t na = std::min(a.size(), n);
+    if (F::LAZY_REDUCE) {
+        // Convolution order: each output coefficient is one unreduced
+        // accumulation, reduced once.
+        size_t nb = std::min(b.size(), n);
+        if (na == 0 || nb == 0) return;
+        size_t n_out = std::min(n, na + nb - 1);
+        for (size_t k = 0; k < n_out; ++k) {
+            size_t lo = k + 1 > nb ? k + 1 - nb : 0, hi = std::min(k + 1, na);
+            typename F::Wide acc = field.WideZero();
+            for (size_t i = lo; i < hi; ++i) acc = field.WideXor(acc, field.MulWide(a[i], b[k - i]));
+            out[k] = field.Reduce(acc);
+        }
+        return;
+    }
     for (size_t i = 0; i < na; ++i) {
         Elem coeff = a[i];
         if (coeff == 0) continue;
@@ -215,11 +229,13 @@ constexpr bool TraceModCheapScalarMul() {
 }
 
 /** The degree at which TraceMod switches from the square-table reducer to
- * the reciprocal reducer. The additive-FFT tier makes the reciprocal path's
- * multiplications cheap enough that the crossover halves - but only for
- * field implementations with a cheap scalar Multiplier; the generic fields
- * pay a Multiplier table build per FFT block, which keeps their crossover
- * at the original value. */
+ * the reciprocal reducer. For field implementations with a cheap scalar
+ * Multiplier (CLMUL) the additive-FFT tier speeds up the reciprocal path,
+ * but the lazily-reducing square-table reducer is faster still, so the
+ * crossover sits slightly below the original value (measured on Zen 3,
+ * Haswell and Cortex-A76; the table no longer fits L2 there, but streams
+ * well). The generic fields keep the original value: their reciprocal
+ * path pays slow one-off products in the FFT. */
 template<typename F>
 size_t TraceModTableCutoff(const F& field) {
     return (TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) ? TRACEMOD_FFT_TABLE_CUTOFF : TRACEMOD_TABLE_CUTOFF;
@@ -813,6 +829,8 @@ class TraceMod {
     // for the Karatsuba multiplications, hoisted here so the trace loop is
     // allocation-free in steady state.
     std::vector<Elem> sqr_tmp;
+    std::vector<const Elem*> sqr_rows;
+    std::vector<Elem> sqr_coeffs;
     std::vector<Elem> rev_val, q_rev, quot, prod;
     TraceModScratch<F> scratch;
 
@@ -875,6 +893,66 @@ private:
 
     void SquareReduce(std::vector<Elem>& val) {
         sqr_tmp.assign(d, 0);
+        if (F::LAZY_REDUCE) {
+            // Accumulate the row contributions unreduced (one reduction per
+            // output coefficient instead of one per row entry), in column
+            // blocks of 8 whose accumulators stay in registers; every row is
+            // still read once per call.
+            sqr_rows.clear();
+            sqr_coeffs.clear();
+            for (size_t i = 0; i < val.size(); ++i) {
+                if (val[i] == 0) continue;
+                Elem coeff = field.Sqr(val[i]);
+                size_t e = 2 * i;
+                if (e < d) {
+                    sqr_tmp[e] ^= coeff;
+                } else {
+                    const Elem* row = Row(e);
+                    if (coeff == 1) {
+                        for (size_t j = 0; j < d; ++j) sqr_tmp[j] ^= row[j];
+                    } else {
+                        sqr_rows.push_back(row);
+                        sqr_coeffs.push_back(coeff);
+                    }
+                }
+            }
+            const size_t nrows = sqr_rows.size();
+            if (nrows) {
+                typedef typename F::Wide Wide;
+                size_t j = 0;
+                for (; j + 8 <= d; j += 8) {
+                    Wide a0 = field.WideZero(), a1 = a0, a2 = a0, a3 = a0, a4 = a0, a5 = a0, a6 = a0, a7 = a0;
+                    for (size_t r = 0; r < nrows; ++r) {
+                        const Elem* row = sqr_rows[r] + j;
+                        Elem c = sqr_coeffs[r];
+                        a0 = field.WideXor(a0, field.MulWide(c, row[0]));
+                        a1 = field.WideXor(a1, field.MulWide(c, row[1]));
+                        a2 = field.WideXor(a2, field.MulWide(c, row[2]));
+                        a3 = field.WideXor(a3, field.MulWide(c, row[3]));
+                        a4 = field.WideXor(a4, field.MulWide(c, row[4]));
+                        a5 = field.WideXor(a5, field.MulWide(c, row[5]));
+                        a6 = field.WideXor(a6, field.MulWide(c, row[6]));
+                        a7 = field.WideXor(a7, field.MulWide(c, row[7]));
+                    }
+                    sqr_tmp[j] ^= field.Reduce(a0);
+                    sqr_tmp[j + 1] ^= field.Reduce(a1);
+                    sqr_tmp[j + 2] ^= field.Reduce(a2);
+                    sqr_tmp[j + 3] ^= field.Reduce(a3);
+                    sqr_tmp[j + 4] ^= field.Reduce(a4);
+                    sqr_tmp[j + 5] ^= field.Reduce(a5);
+                    sqr_tmp[j + 6] ^= field.Reduce(a6);
+                    sqr_tmp[j + 7] ^= field.Reduce(a7);
+                }
+                for (; j < d; ++j) {
+                    Wide a = field.WideZero();
+                    for (size_t r = 0; r < nrows; ++r) a = field.WideXor(a, field.MulWide(sqr_coeffs[r], sqr_rows[r][j]));
+                    sqr_tmp[j] ^= field.Reduce(a);
+                }
+            }
+            val.swap(sqr_tmp);
+            while (!val.empty() && val.back() == 0) val.pop_back();
+            return;
+        }
         for (size_t i = 0; i < val.size(); ++i) {
             if (val[i] == 0) continue;
             Elem coeff = field.Sqr(val[i]);
@@ -1004,14 +1082,27 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
     }
     TraceMod<F> trace_mod(poly, field);
     std::vector<Elem> orbit{0, 1};
+    // Lazily-reducing fields accumulate all Bits orbit terms unreduced.
+    std::vector<typename F::Wide> wide;
+    if (F::LAZY_REDUCE) wide.assign(depths * d, field.WideZero());
     for (int i = 0; i < field.Bits(); ++i) {
         for (size_t k = 0; k < depths; ++k) {
-            typename F::Multiplier mul(field, coef[k]);
-            auto& t = traces[k];
-            for (size_t j = 0; j < orbit.size(); ++j) t[j] ^= mul(orbit[j]);
+            if (F::LAZY_REDUCE) {
+                typename F::Wide* w = wide.data() + k * d;
+                for (size_t j = 0; j < orbit.size(); ++j) w[j] = field.WideXor(w[j], field.MulWide(coef[k], orbit[j]));
+            } else {
+                typename F::Multiplier mul(field, coef[k]);
+                auto& t = traces[k];
+                for (size_t j = 0; j < orbit.size(); ++j) t[j] ^= mul(orbit[j]);
+            }
             coef[k] = field.Sqr(coef[k]);
         }
         trace_mod.SquareAndReduce(orbit);
+    }
+    if (F::LAZY_REDUCE) {
+        for (size_t k = 0; k < depths; ++k) {
+            for (size_t j = 0; j < d; ++j) traces[k][j] = field.Reduce(wide[k * d + j]);
+        }
     }
     for (auto& t : traces) PolyStrip(t);
     return orbit.size() == 2 && orbit[0] == 0 && orbit[1] == 1;
@@ -1359,17 +1450,24 @@ std::vector<typename F::Elem> BerlekampMassey(const std::vector<typename F::Elem
     prev[0] = 1;
     typename F::Elem b = 1, b_inv = 1;
     bool b_have_inv = true;
-    table.reserve(syndromes.size());
+    if (!F::LAZY_REDUCE) table.reserve(syndromes.size());
     // Earliest number of processed syndromes at which a tail verification
     // is attempted; pushed back geometrically after a failed attempt.
     size_t next_verify = BM_VERIFY_MIN_PREFIX;
 
     for (size_t n = 0; n != syndromes.size(); ++n) {
-        table.emplace_back(field, syndromes[n]);
+        // Lazily-reducing fields need no per-syndrome Multiplier.
+        if (!F::LAZY_REDUCE) table.emplace_back(field, syndromes[n]);
         // Index n holds S_{n+1}; even-indexed S have zero discrepancy.
         if (n & 1) continue;
         auto discrepancy = syndromes[n];
-        for (size_t i = 1; i < current.size(); ++i) discrepancy ^= table[n - i](current[i]);
+        if (F::LAZY_REDUCE) {
+            typename F::Wide acc = field.WideZero();
+            for (size_t i = 1; i < current.size(); ++i) acc = field.WideXor(acc, field.MulWide(syndromes[n - i], current[i]));
+            discrepancy ^= field.Reduce(acc);
+        } else {
+            for (size_t i = 1; i < current.size(); ++i) discrepancy ^= table[n - i](current[i]);
+        }
         if (discrepancy != 0) {
             int x = static_cast<int>(n + 1 - (current.size() - 1) - (prev.size() - 1));
             if (!b_have_inv) {

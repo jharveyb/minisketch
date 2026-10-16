@@ -60,6 +60,7 @@ static inline Clmul128 Clmul00(ClmulPoly a, ClmulPoly b) { return _mm_clmulepi64
 // hi(a) × lo(b). (imm8 bit 0 selects the high half of a; bit 4 clear selects the low half of b.)
 static inline Clmul128 Clmul01(ClmulPoly a, ClmulPoly b) { return _mm_clmulepi64_si128(a, b, 0x01); }
 static inline Clmul128 ClmulXor(Clmul128 a, Clmul128 b) { return _mm_xor_si128(a, b); }
+static inline Clmul128 ClmulZero() { return _mm_setzero_si128(); }
 static inline Clmul128 ClmulOr(Clmul128 a, Clmul128 b) { return _mm_or_si128(a, b); }
 template<int N> static inline Clmul128 ClmulSrliEpi64(Clmul128 v) { return _mm_srli_epi64(v, N); }
 template<int N> static inline Clmul128 ClmulSlliEpi64(Clmul128 v) { return _mm_slli_epi64(v, N); }
@@ -90,6 +91,7 @@ static inline Clmul128 Clmul01(ClmulPoly a, ClmulPoly b) {
     return vreinterpretq_u64_p128(vmull_p64(vgetq_lane_p64(a, 1), vgetq_lane_p64(b, 0)));
 }
 static inline Clmul128 ClmulXor(Clmul128 a, Clmul128 b) { return veorq_u64(a, b); }
+static inline Clmul128 ClmulZero() { return vdupq_n_u64(0); }
 static inline Clmul128 ClmulOr(Clmul128 a, Clmul128 b) { return vorrq_u64(a, b); }
 template<int N> static inline Clmul128 ClmulSrliEpi64(Clmul128 v) { return vshrq_n_u64(v, N); }
 template<int N> static inline Clmul128 ClmulSlliEpi64(Clmul128 v) { return vshlq_n_u64(v, N); }
@@ -98,12 +100,14 @@ template<int N> static inline Clmul128 ClmulSrliBytes(Clmul128 v) {
 }
 #endif
 
-template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I MulWithClMulReduce(I a, I b)
+/** Reduce an unreduced carry-less product (degree <= 2*BITS-2) modulo
+ *  x^BITS + MOD. The reduction is GF(2)-linear in its input, so it also
+ *  reduces XOR-sums of such products (see GenField::Reduce). */
+template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I ReduceWithClMul(Clmul128 product)
 {
     static constexpr I MASK = Mask<BITS, I>();
 
     const ClmulPoly MOD128 = ClmulLoad64(MOD);
-    Clmul128 product = Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b));
     if (BITS <= 32) {
         Clmul128 high1 = ClmulSrliEpi64<BITS>(product);
         Clmul128 red1 = Clmul00(ClmulAsPoly(high1), MOD128);
@@ -135,11 +139,16 @@ template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I MulWithClMulReduce(I 
     }
 }
 
-template<typename I, int BITS, int POS> NO_SANITIZE_MEMORY I MulTrinomial(I a, I b)
+template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I MulWithClMulReduce(I a, I b)
+{
+    return ReduceWithClMul<I, BITS, MOD>(Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b)));
+}
+
+/** Like ReduceWithClMul, for the trinomial x^BITS + x^POS + 1. */
+template<typename I, int BITS, int POS> NO_SANITIZE_MEMORY I ReduceTrinomial(Clmul128 product)
 {
     static constexpr I MASK = Mask<BITS, I>();
 
-    Clmul128 product = Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b));
     if (BITS <= 32) {
         Clmul128 high1 = ClmulSrliEpi64<BITS>(product);
         Clmul128 red1 = ClmulXor(high1, ClmulSlliEpi64<POS>(high1));
@@ -171,8 +180,13 @@ template<typename I, int BITS, int POS> NO_SANITIZE_MEMORY I MulTrinomial(I a, I
     }
 }
 
+template<typename I, int BITS, int POS> NO_SANITIZE_MEMORY I MulTrinomial(I a, I b)
+{
+    return ReduceTrinomial<I, BITS, POS>(Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b)));
+}
+
 /** Implementation of fields that use the SSE clmul intrinsic for multiplication. */
-template<typename I, int B, I MOD, I (*MUL)(I, I), typename F, const F* SQR, const F* SQR2, const F* SQR4, const F* SQR8, const F* SQR16, const F* QRT, typename T, const T* LOAD, const T* SAVE> struct GenField
+template<typename I, int B, I MOD, I (*MUL)(I, I), I (*RED)(Clmul128), typename F, const F* SQR, const F* SQR2, const F* SQR4, const F* SQR8, const F* SQR16, const F* QRT, typename T, const T* LOAD, const T* SAVE> struct GenField
 {
     typedef BitsInt<I, B> O;
     typedef LFSR<O, MOD> L;
@@ -199,6 +213,17 @@ public:
         inline constexpr explicit Multiplier(const GenField&, Elem a) : m_val(a) {}
         constexpr Elem operator()(Elem a) const { return MUL(m_val, a); }
     };
+
+    /** Lazy reduction: Mul(a, b) == Reduce(MulWide(a, b)), and since the
+     *  reduction is GF(2)-linear, a sum of products can be accumulated
+     *  unreduced with WideXor and reduced once - one carry-less
+     *  multiplication per term instead of three. */
+    static constexpr bool LAZY_REDUCE = true;
+    typedef Clmul128 Wide;
+    static inline Wide WideZero() { return ClmulZero(); }
+    static inline Wide MulWide(Elem a, Elem b) { return Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b)); }
+    static inline Wide WideXor(Wide a, Wide b) { return ClmulXor(a, b); }
+    inline Elem Reduce(Wide w) const { return RED(w); }
 
     /** Compute the square of a. */
     inline constexpr Elem Sqr(Elem val) const { return SQR->template Map<O>(val); }
@@ -230,10 +255,10 @@ public:
 };
 
 template<typename I, int B, I MOD, typename F, const F* SQR, const F* SQR2, const F* SQR4, const F* SQR8, const F* SQR16, const F* QRT, typename T, const T* LOAD, const T* SAVE>
-using Field = GenField<I, B, MOD, MulWithClMulReduce<I, B, MOD>, F, SQR, SQR2, SQR4, SQR8, SQR16, QRT, T, LOAD, SAVE>;
+using Field = GenField<I, B, MOD, MulWithClMulReduce<I, B, MOD>, ReduceWithClMul<I, B, MOD>, F, SQR, SQR2, SQR4, SQR8, SQR16, QRT, T, LOAD, SAVE>;
 
 template<typename I, int B, int POS, typename F, const F* SQR, const F* SQR2, const F* SQR4, const F* SQR8, const F* SQR16, const F* QRT, typename T, const T* LOAD, const T* SAVE>
-using FieldTri = GenField<I, B, I(1) + (I(1) << POS), MulTrinomial<I, B, POS>, F, SQR, SQR2, SQR4, SQR8, SQR16, QRT, T, LOAD, SAVE>;
+using FieldTri = GenField<I, B, I(1) + (I(1) << POS), MulTrinomial<I, B, POS>, ReduceTrinomial<I, B, POS>, F, SQR, SQR2, SQR4, SQR8, SQR16, QRT, T, LOAD, SAVE>;
 
 }
 
