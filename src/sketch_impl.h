@@ -35,7 +35,7 @@
 #define MINISKETCH_FAST_DIVMOD_CUTOFF 1024
 #endif
 #ifndef MINISKETCH_HGCD_CUTOFF
-#define MINISKETCH_HGCD_CUTOFF 1024
+#define MINISKETCH_HGCD_CUTOFF 4096
 #endif
 #ifndef MINISKETCH_HGCD_ITER_CROSSOVER
 #define MINISKETCH_HGCD_ITER_CROSSOVER 24
@@ -828,9 +828,9 @@ void HalfGCDMatrix(PolyMat22<F>& mat, const std::vector<typename F::Elem>& u_in,
 
 /** The FastGCD engage threshold for a field, on the same eligibility terms
  * as FastDivModCutoff. The measured crossover against the quadratic loop is
- * high: the schoolbook remainder steps are Multiplier-based and
- * allocation-free, so the half-gcd's matrix machinery only pays at
- * top-of-tree degrees. */
+ * high: the lazily-reducing, normalization-free Euclid loop (GCD) beats the
+ * half-gcd's matrix machinery at every degree up to 4096 on an i7-4770 and
+ * a Pi 5 (by ~10% at 2048 and 4096). */
 template<typename F>
 size_t FastGCDCutoff(const F& field) {
     if (!TraceModFFTCapable(field) || !TraceModCheapScalarMul<F>()) return std::numeric_limits<size_t>::max();
