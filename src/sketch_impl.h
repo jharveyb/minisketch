@@ -50,6 +50,10 @@
 #ifndef MINISKETCH_DIVMOD_LAZY_MIN
 #define MINISKETCH_DIVMOD_LAZY_MIN 4
 #endif
+/* Node degree up to which RecFindRoots computes traces with SmallTrace. */
+#ifndef MINISKETCH_SMALL_TRACE_MAX
+#define MINISKETCH_SMALL_TRACE_MAX 8
+#endif
 /* Berlekamp-Massey early termination: a tail verification is attempted after
  * a zero discrepancy once at least MIN_PREFIX syndromes are processed, the
  * processed count exceeds twice the LFSR length by GAP, and at least MIN_TAIL
@@ -107,6 +111,7 @@ static const size_t FAST_DIVMOD_CUTOFF = MINISKETCH_FAST_DIVMOD_CUTOFF;
 static const size_t HGCD_CUTOFF = MINISKETCH_HGCD_CUTOFF;
 static const size_t HGCD_ITER_CROSSOVER = MINISKETCH_HGCD_ITER_CROSSOVER;
 static const size_t BM_VERIFY_GAP = MINISKETCH_BM_VERIFY_GAP;
+static const size_t SMALL_TRACE_MAX = MINISKETCH_SMALL_TRACE_MAX;
 static const size_t DIVMOD_LAZY_MIN = MINISKETCH_DIVMOD_LAZY_MIN;
 static const size_t GCD_INVFREE_MAX = MINISKETCH_GCD_INVFREE_MAX;
 static const size_t BM_VERIFY_MIN_PREFIX = MINISKETCH_BM_VERIFY_MIN_PREFIX;
@@ -1327,6 +1332,65 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
     return orbit.size() == 2 && orbit[0] == 0 && orbit[1] == 1;
 }
 
+/** Tr(param * x) mod poly for small monic poly (3 <= degree <= 8), on
+ * fixed-size local arrays: the per-node TraceMod machinery (tables,
+ * scratch buffers, vector bookkeeping per squaring) costs far more than
+ * the ~d^2/2 products per squaring at these degrees. Rows x^e mod poly for
+ * e in [d, 2d-2] are built once; each of the Bits-1 steps squares the
+ * coefficients and folds the high ones in through the rows (lazily
+ * reduced where the field supports it). */
+template<typename F>
+void SmallTrace(const std::vector<typename F::Elem>& poly, typename F::Elem param, std::vector<typename F::Elem>& out, const F& field) {
+    typedef typename F::Elem Elem;
+    typedef typename F::Wide Wide;
+    const size_t d = poly.size() - 1;
+    CHECK_SAFE(d >= 3 && d <= SMALL_TRACE_MAX && poly.back() == 1);
+    Elem rows[SMALL_TRACE_MAX - 1][SMALL_TRACE_MAX];
+    Elem rem[SMALL_TRACE_MAX];
+    for (size_t j = 0; j < d; ++j) rem[j] = poly[j];
+    // rows[e - d] = x^e mod poly.
+    for (size_t e = d; e + 1 < 2 * d; ++e) {
+        for (size_t j = 0; j < d; ++j) rows[e - d][j] = rem[j];
+        Elem fold = rem[d - 1];
+        for (size_t j = d - 1; j > 0; --j) rem[j] = rem[j - 1] ^ field.Mul(fold, poly[j]);
+        rem[0] = field.Mul(fold, poly[0]);
+    }
+    Elem x[SMALL_TRACE_MAX] = {0};
+    x[1] = param;
+    for (int it = 0; it < field.Bits() - 1; ++it) {
+        Elem nx[SMALL_TRACE_MAX] = {0};
+        if (F::LAZY_REDUCE) {
+            Wide acc[SMALL_TRACE_MAX];
+            for (size_t j = 0; j < d; ++j) acc[j] = field.WideZero();
+            for (size_t i = 0; i < d; ++i) {
+                Elem c = field.Sqr(x[i]);
+                if (2 * i < d) {
+                    nx[2 * i] ^= c;
+                } else {
+                    const Elem* row = rows[2 * i - d];
+                    for (size_t j = 0; j < d; ++j) acc[j] = field.WideXor(acc[j], field.MulWide(c, row[j]));
+                }
+            }
+            for (size_t j = 0; j < d; ++j) nx[j] ^= field.Reduce(acc[j]);
+        } else {
+            for (size_t i = 0; i < d; ++i) {
+                Elem c = field.Sqr(x[i]);
+                if (2 * i < d) {
+                    nx[2 * i] ^= c;
+                } else if (c != 0) {
+                    typename F::Multiplier mul(field, c);
+                    const Elem* row = rows[2 * i - d];
+                    for (size_t j = 0; j < d; ++j) nx[j] ^= mul(row[j]);
+                }
+            }
+        }
+        nx[1] ^= param;
+        for (size_t j = 0; j < d; ++j) x[j] = nx[j];
+    }
+    out.assign(x, x + d);
+    PolyStrip(out);
+}
+
 /** One step of the root finding algorithm; finds roots of stack[pos] and adds them to roots. Stack elements >= pos are destroyed.
  *
  * It operates on a stack of polynomials. The polynomial operated on is `stack[pos]`, where elements of `stack` with index higher
@@ -1397,8 +1461,12 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
                 FastDivMod(poly, trace, tmp, field, FastDivModCutoff(field));
                 PolyStrip(trace);
             } else {
-                if (!trace_mod) trace_mod.reset(new TraceMod<F>(poly, field));
-                trace_mod->trace(trace, randv);
+                if (fully_factorizable && poly.size() - 1 <= SMALL_TRACE_MAX) {
+                    SmallTrace(poly, randv, trace, field);
+                } else {
+                    if (!trace_mod) trace_mod.reset(new TraceMod<F>(poly, field));
+                    trace_mod->trace(trace, randv);
+                }
             }
             MINISKETCH_COZ_END("findroots-trace");
 
