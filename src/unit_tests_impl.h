@@ -795,6 +795,37 @@ void TestFindRootsOrbit(const F& field, uint64_t lowmod, TestRand& rng, size_t i
 
         std::vector<Elem> dup{roots[rng.RandRange(roots.size())], 1};
         UT_REQUIRE(FindRoots(PolyMulRef(poly, dup, field), basis, field).empty());
+
+        // The split parameters must be GF(2)-linearly independent (rank
+        // Bits over the bit representation), and each orbit trace must be
+        // Tr(beta_k x) mod poly: GF(2)-valued at every root.
+        std::vector<std::vector<Elem>> traces;
+        std::vector<Elem> betas;
+        UT_REQUIRE(ComputeTraceOrbit(poly, basis, 4, field, traces, betas));
+        UT_REQUIRE(betas.size() == size_t(bits));
+        uint64_t pivot[64] = {0};
+        for (auto b : betas) {
+            uint64_t v = uint64_t(b);
+            int bit = 63;
+            for (; bit >= 0; --bit) {
+                if (!((v >> bit) & 1)) continue;
+                if (!pivot[bit]) break;
+                v ^= pivot[bit];
+            }
+            UT_REQUIRE(bit >= 0); // reduced to zero: dependent
+            pivot[bit] = v;
+        }
+        for (size_t k = 0; k < traces.size(); ++k) {
+            for (auto root : roots) {
+                Elem val = 0, pw = 1;
+                for (auto c : traces[k]) {
+                    val ^= field.Mul(c, pw);
+                    pw = field.Mul(pw, root);
+                }
+                UT_REQUIRE(val == 0 || val == 1);
+                UT_REQUIRE(val == Elem(RefTrace(uint64_t(field.Mul(betas[k], root)), bits, lowmod)));
+            }
+        }
     }
 }
 
