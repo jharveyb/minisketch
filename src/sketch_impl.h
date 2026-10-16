@@ -108,6 +108,11 @@
 #endif
 /* Node degree from which Montgomery-form split traces are normalized
  * before the gcd (MontTowerTrace). */
+/* Node degree from which Montgomery-form nodes divide out a split factor
+ * pointwise on their coset instead of by long division. */
+#ifndef MINISKETCH_COSET_DIV_MIN
+#define MINISKETCH_COSET_DIV_MIN 64
+#endif
 #ifndef MINISKETCH_MONT_NORMALIZE_MIN
 #define MINISKETCH_MONT_NORMALIZE_MIN 512
 #endif
@@ -148,6 +153,7 @@ static const size_t ORBIT_NODE_FACTOR = MINISKETCH_ORBIT_NODE_FACTOR;
 static const size_t MONT_ORBIT_MIN_DEGREE = MINISKETCH_MONT_ORBIT_MIN_DEGREE;
 static const size_t SMALL_CARRY_MAX = MINISKETCH_SMALL_CARRY_MAX;
 static const size_t MONT_NORMALIZE_MIN = MINISKETCH_MONT_NORMALIZE_MIN;
+static const size_t COSET_DIV_MIN = MINISKETCH_COSET_DIV_MIN;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -1495,9 +1501,10 @@ struct MontCarry {
 
 /** Carry the Montgomery-form traces of a parent node to its factor g
  * (monic, 3 <= deg g < parent's degree) for the traces l >= l_min: halve
- * the coset while deg g fits in the half. */
+ * the coset while deg g fits in the half. gv, if given, holds g's values
+ * on the parent's coset (both halves of the first halving). */
 template<typename F>
-void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F::Elem>& g, int l_min, MontCarry<F>& child, const F& field) {
+void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F::Elem>& g, int l_min, MontCarry<F>& child, const F& field, const std::vector<typename F::Elem>* gv = nullptr) {
     typedef typename F::Elem Elem;
     const AdditiveFFT<F>& fft = parent.tree->fft;
     const size_t d = g.size() - 1;
@@ -1517,8 +1524,13 @@ void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F:
     while (child.m > 1 && d <= (size_t(1) << (child.m - 1))) {
         const int mh = child.m - 1;
         const size_t h = size_t(1) << mh, b0 = 2 * child.block, b1 = b0 + 1;
-        MontCoset<F>::Eval(fft, field, mh, b0, g, g0);
-        MontCoset<F>::Eval(fft, field, mh, b1, g, child.ga);
+        if (gv && child.m == parent.m) {
+            g0.assign(gv->begin(), gv->begin() + h);
+            child.ga.assign(gv->begin() + h, gv->end());
+        } else {
+            MontCoset<F>::Eval(fft, field, mh, b0, g, g0);
+            MontCoset<F>::Eval(fft, field, mh, b1, g, child.ga);
+        }
         // g divides the root polynomial, which has no root on the root
         // coset, of which every descendant coset is a subset.
         bool ok = BatchInvert(g0, inv_g0, field);
@@ -1536,6 +1548,7 @@ void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F:
         child.m = mh;
         child.block = b1;
     }
+    if (gv && child.m == parent.m) child.ga = *gv;
 }
 
 /** out = sum_(r<MONT_TOWER_BITS) (zk * t)^(2^r) mod g for t of degree
@@ -2104,7 +2117,27 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
     }
     MakeMonic(trace, field);
     MINISKETCH_COZ_BEGIN("findroots-divmod");
-    FastDivMod(trace, poly, tmp, field, FastDivModCutoff(field));
+    // Values of the two factors on the node's coset, for Montgomery-form
+    // nodes: poly = trace * tmp exactly, so tmp is poly / trace pointwise
+    // there (trace has no root on the coset, as a factor of the root
+    // polynomial), one interpolation instead of a long division; the
+    // values also seed both factors' carries.
+    std::vector<typename F::Elem> trace_v, tmp_v;
+    if (carry && carry->tree && !carry->normal && node_degree >= COSET_DIV_MIN) {
+        MontCoset<F>& mc = get_node_mc();
+        MontCoset<F>::Eval(carry->tree->fft, field, mc.m, mc.block, trace, trace_v);
+        std::vector<typename F::Elem> inv;
+        bool ok = BatchInvert(trace_v, inv, field);
+        CHECK_SAFE(ok);
+        (void)ok;
+        tmp_v.resize(mc.n);
+        for (size_t j = 0; j < mc.n; ++j) tmp_v[j] = field.Mul(mc.Values()[j], inv[j]);
+        std::vector<typename F::Elem> v = tmp_v;
+        mc.ToCoefficients(v, tmp);
+        CHECK_SAFE(tmp.size() == node_degree - (trace.size() - 1) + 1 && tmp.back() == 1);
+    } else {
+        FastDivMod(trace, poly, tmp, field, FastDivModCutoff(field));
+    }
     MINISKETCH_COZ_END("findroots-divmod");
     // At this point, the stack looks like [... (poly) tmp trace], and we want to recursively
     // find roots of trace and tmp (= poly/trace). As we don't care about poly anymore, move
@@ -2116,10 +2149,10 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
         const int l_min = depth / MONT_TOWER_BITS;
         std::vector<typename F::Elem> node_t[CARRY_TRACES];
         bool have_node_t = carry->normal;
-        auto to_factor = [&](const std::vector<typename F::Elem>& g, MontCarry<F>& out) {
+        auto to_factor = [&](const std::vector<typename F::Elem>& g, const std::vector<typename F::Elem>& gv, MontCarry<F>& out) {
             if (g.size() - 1 < 3) return;
             if (!carry->normal && g.size() - 1 > SMALL_CARRY_MAX) {
-                MontCarryToFactor(*carry, g, l_min, out, field);
+                MontCarryToFactor(*carry, g, l_min, out, field, gv.empty() ? nullptr : &gv);
                 return;
             }
             if (!have_node_t) {
@@ -2143,8 +2176,8 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
                 if (out.t[l].empty()) out.t[l].assign(1, 0);
             }
         };
-        to_factor(poly, carry_poly);
-        to_factor(tmp, carry_tmp);
+        to_factor(poly, trace_v, carry_poly);
+        to_factor(tmp, tmp_v, carry_tmp);
     }
     // Now the stack is [... (trace) tmp ...]. First we factor tmp (at pos = pos+1), and then
     // we factor trace (at pos = pos).
