@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bkb": {
+      "type": "stdio",
+      "command": "/nix/var/nix/profiles/default/bin/nix",
+      "args": ["run", "--quiet", "${CLAUDE_PROJECT_DIR:-.}#bkb-mcp"],
+      "env": {
+        "BKB_API_URL": "https://bitcoinknowledge.dev"
+      }
+    }
+  }
+}

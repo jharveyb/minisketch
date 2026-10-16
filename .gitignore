@@ -55,3 +55,9 @@ profile.jsonl
 !/.envrc
 /.direnv/
 /result*
+
+# Claude Code project config (shared); per-user local overrides stay ignored.
+!/.claude/
+!/.mcp.json
+/.claude/settings.local.json
+/.claude/worktrees/

@@ -1,0 +1,29 @@
+{
+  "enabledPlugins": {
+    "clangd-lsp@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "property-based-testing@trailofbits": true,
+    "modern-python@trailofbits": true,
+    "ast-grep@ast-grep-marketplace": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    },
+    "trailofbits": {
+      "source": {
+        "source": "github",
+        "repo": "trailofbits/skills"
+      }
+    },
+    "ast-grep-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "ast-grep/agent-skill"
+      }
+    }
+  }
+}
