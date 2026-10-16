@@ -3,7 +3,7 @@
     "clangd-lsp@claude-plugins-official": true,
     "context7@claude-plugins-official": true,
     "property-based-testing@trailofbits": true,
-    "modern-python@trailofbits": true,
+    "mutation-testing@trailofbits": true,
     "ast-grep@ast-grep-marketplace": true
   },
   "extraKnownMarketplaces": {
