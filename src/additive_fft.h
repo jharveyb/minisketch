@@ -100,16 +100,25 @@ public:
     const std::vector<Elem>& Basis() const { return beta; }
 
     /** In-place transform of f (size 2^m, m <= MaxDim()): coefficients to
-     *  evaluations at eta_0..eta_{2^m - 1}. */
-    void FFT(std::vector<Elem>& f, int m, const F& field) const {
+     *  evaluations at eta_0..eta_{2^m - 1}.
+     *
+     *  With block != 0 ((block + 1) * 2^m <= 2^MaxDim()) the evaluation set
+     *  is instead the coset W_m + eta_(block * 2^m) of the subspace: index j
+     *  holds the evaluation at eta_(block * 2^m + j). These are the points
+     *  of block `block` of a larger transform, so its twiddles serve
+     *  unchanged: block i of round r has base point
+     *  eta_((i + block * 2^r) << p), twiddle twiddle[i + block * 2^r]. */
+    void FFT(std::vector<Elem>& f, int m, const F& field, size_t block = 0) const {
         CHECK_SAFE(m >= 1 && m <= max_t && f.size() == (size_t(1) << m));
+        CHECK_SAFE(((block + 1) << m) <= (size_t(1) << max_t));
         for (int r = 0; r < m; ++r) {
             int p = m - r;
             size_t h = size_t(1) << (p - 1);
             const std::vector<size_t>& zs = zeta[p - 1];
             for (size_t i = 0; i < (size_t(1) << r); ++i) {
                 size_t off = i << p;
-                Elem tw = twiddle[i];
+                size_t ti = i + (block << r);
+                Elem tw = twiddle[ti];
                 // Divide the block by Z_{W_{p-1}} (XOR cascades) while
                 // applying the twiddle multiply-accumulate into the low half.
                 // Decreasing k is essential: cascades from higher k can land
@@ -121,8 +130,8 @@ public:
                         if (c == 0) continue;
                         for (size_t z : zs) f[k - z] ^= c;
                     }
-                } else if (i < tw_mul.size()) {
-                    const typename F::Multiplier& mul = tw_mul[i];
+                } else if (ti < tw_mul.size()) {
+                    const typename F::Multiplier& mul = tw_mul[ti];
                     for (size_t k = off + 2 * h; k-- > off + h; ) {
                         Elem c = f[k];
                         if (c == 0) continue;
@@ -152,16 +161,18 @@ public:
         }
     }
 
-    /** Exact inverse of FFT. */
-    void IFFT(std::vector<Elem>& f, int m, const F& field) const {
+    /** Exact inverse of FFT (on the same coset block). */
+    void IFFT(std::vector<Elem>& f, int m, const F& field, size_t block = 0) const {
         CHECK_SAFE(m >= 1 && m <= max_t && f.size() == (size_t(1) << m));
+        CHECK_SAFE(((block + 1) << m) <= (size_t(1) << max_t));
         for (int r = m - 1; r >= 0; --r) {
             int p = m - r;
             size_t h = size_t(1) << (p - 1);
             const std::vector<size_t>& zs = zeta[p - 1];
             for (size_t i = 0; i < (size_t(1) << r); ++i) {
                 size_t off = i << p;
-                Elem tw = twiddle[i];
+                size_t ti = i + (block << r);
+                Elem tw = twiddle[ti];
                 // Undo f1 = f0 + q: the high half becomes q again.
                 for (size_t k = off; k < off + h; ++k) f[k + h] ^= f[k];
                 // Undo the fused division and twiddle multiply-accumulate.
@@ -173,8 +184,8 @@ public:
                         if (c == 0) continue;
                         for (size_t z : zs) f[k - z] ^= c;
                     }
-                } else if (i < tw_mul.size()) {
-                    const typename F::Multiplier& mul = tw_mul[i];
+                } else if (ti < tw_mul.size()) {
+                    const typename F::Multiplier& mul = tw_mul[ti];
                     for (size_t k = off + h; k < off + 2 * h; ++k) {
                         Elem c = f[k];
                         if (c == 0) continue;

@@ -89,6 +89,12 @@
 #ifndef MINISKETCH_ORBIT_NODE_FACTOR
 #define MINISKETCH_ORBIT_NODE_FACTOR 2
 #endif
+/* Root degree from which the Frobenius orbit uses coset Montgomery
+ * reduction (MontgomeryOrbit) on fields with the FFT tier and a cheap
+ * scalar Multiplier. */
+#ifndef MINISKETCH_MONT_ORBIT_MIN_DEGREE
+#define MINISKETCH_MONT_ORBIT_MIN_DEGREE 256
+#endif
 /* Lazy Karatsuba middle-product tail check (lazily-reducing fields): used
  * for LFSR lengths in [KARA_MIN_DEGREE, FFT_MIN_DEGREE), below which the
  * direct check wins (from ~32 on Haswell, ~96 on Cortex-A76); direct
@@ -123,6 +129,7 @@ static const size_t MP_BASE = MINISKETCH_MP_BASE;
 static const size_t ORBIT_MIN_DEGREE = MINISKETCH_ORBIT_MIN_DEGREE;
 static const size_t ORBIT_EXTRA_DEPTHS = MINISKETCH_ORBIT_EXTRA_DEPTHS;
 static const size_t ORBIT_NODE_FACTOR = MINISKETCH_ORBIT_NODE_FACTOR;
+static const size_t MONT_ORBIT_MIN_DEGREE = MINISKETCH_MONT_ORBIT_MIN_DEGREE;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -1205,6 +1212,193 @@ typename F::Elem SubfieldGenerator8(const F& field) {
     }
 }
 
+/** Frobenius orbit sums by Montgomery reduction on one coset of the
+ * additive-FFT subspace.
+ *
+ * For monic poly = f of degree d, with N = 2^m >= d, let A be a coset of
+ * the transform subspace W_m (AdditiveFFT::FFT's sel) and Z_A(x) its
+ * vanishing polynomial: degree N, and in the Cantor basis Z_A(x) =
+ * sum_(j subset of m) x^(2^j) + c, so its formal derivative is Z_A' = 1.
+ * Every residue r is held in Montgomery form r*Z_A mod f as a polynomial of
+ * degree < N, represented by its N values on A. A squaring
+ * r -> r^2 / Z_A mod f is
+ *     q = r^2 / f mod Z_A        (pointwise on A),
+ *     r' = (r^2 + q*f) / Z_A,
+ * an exact division with deg r' < N since deg(r^2 + q*f) < 2N. On A both
+ * sides of h = r^2 + q*f = r' * Z_A vanish; differentiating,
+ * h' = r'' * Z_A + r' * Z_A' gives r'(w) = h'(w) for w in A, and in
+ * characteristic 2 (r^2)' = 0, so
+ *     r'(w) = q'(w) * f(w) + q(w) * f'(w).
+ * Only q' is not available pointwise: interpolating q (IFFT) and
+ * evaluating its formal derivative (FFT) are the two size-N transforms of
+ * a squaring, against roughly eight for the reciprocal (Barrett) reducer,
+ * whose products have length up to 2d - 1.
+ *
+ * As in ComputeTraceOrbit's tower scheme, with X_i = x^(2^i) mod f,
+ * acc[r] = sum_(i = r mod 8) basis^(2^i) * X_i is accumulated (on A, in
+ * Montgomery form); one more reduction of each, followed by an IFFT,
+ * returns it in normal form with degree < d. X_Bits == x (full
+ * factorizability) is tested by reducing the difference of the Montgomery
+ * forms.
+ *
+ * Requires f to have no root on A (1/f on A); the four cosets of W_m in
+ * W_(m+2) are tried in turn. Returns 1 (factorizable, acc filled), 0 (not
+ * factorizable), or -1 when not applicable (caller falls back). */
+template<typename F>
+int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, const F& field, std::vector<std::vector<typename F::Elem>>& acc) {
+    typedef typename F::Elem Elem;
+    typedef typename F::Wide Wide;
+    const size_t d = poly.size() - 1;
+    const int bits = field.Bits();
+    int m = 1;
+    while ((size_t(1) << m) < d) ++m;
+    if (m + 2 > bits) return -1;
+    const size_t n = size_t(1) << m;
+    AdditiveFFT<F> fft;
+    fft.Extend(field, m + 2);
+    const std::vector<Elem>& beta = fft.Basis();
+    std::vector<Elem> fa, inv_fa(n), dfa(n, 0), q;
+    unsigned sel = 0;
+    bool found = false;
+    for (unsigned s : {1u, 2u, 3u, 0u}) {
+        // f mod Z_A (degree < N): when d == N, subtract the monic Z_A, whose
+        // constant term is Z_(W_m)(s_A) = S^m(s_A) with S(x) = x^2 + x,
+        // which maps beta_m to beta_0 = 1 and beta_(m+1) to beta_1.
+        fa.assign(n, 0);
+        std::copy(poly.begin(), poly.begin() + std::min(d + 1, n), fa.begin());
+        if (d == n) {
+            for (int j = 0; j < m; ++j) {
+                if ((m & j) == j) fa[size_t(1) << j] ^= 1;
+            }
+            fa[0] ^= Elem((s & 1) ? 1 : 0) ^ ((s & 2) ? beta[1] : 0);
+        }
+        fft.FFT(fa, m, field, s);
+        // Batch inversion (Montgomery's trick), failing on a root in A.
+        Elem prod = 1;
+        bool ok = true;
+        for (size_t j = 0; j < n; ++j) {
+            if (fa[j] == 0) {
+                ok = false;
+                break;
+            }
+            inv_fa[j] = prod;
+            prod = field.Mul(prod, fa[j]);
+        }
+        if (!ok) continue;
+        prod = field.Inv(prod);
+        for (size_t j = n; j-- > 0; ) {
+            inv_fa[j] = field.Mul(inv_fa[j], prod);
+            prod = field.Mul(prod, fa[j]);
+        }
+        sel = s;
+        found = true;
+        break;
+    }
+    if (!found) return -1;
+    // f' on A.
+    for (size_t i = 1; i <= d; i += 2) dfa[i - 1] = poly[i];
+    fft.FFT(dfa, m, field, sel);
+
+    // Montgomery form of x: x * Z_A mod f, on A.
+    std::vector<Elem> ra;
+    {
+        std::vector<Elem> c(n + 2, 0), quot;
+        for (int j = 0; j <= m; ++j) {
+            if ((m & j) == j) c[(size_t(1) << j) + 1] = 1;
+        }
+        c[1] ^= Elem((sel & 1) ? 1 : 0) ^ ((sel & 2) ? beta[1] : 0);
+        FastDivMod(poly, c, quot, field, 32);
+        c.resize(n, 0);
+        ra.swap(c);
+        fft.FFT(ra, m, field, sel);
+    }
+    const std::vector<Elem> ra0 = ra;
+
+    // Values on A of the formal derivative of the polynomial (degree < N)
+    // with values v on A: interpolate, differentiate, evaluate.
+    auto derivative = [&](const std::vector<Elem>& v, std::vector<Elem>& out) {
+        out = v;
+        fft.IFFT(out, m, field, sel);
+        for (size_t i = 0; i < n; i += 2) {
+            out[i] = out[i + 1];
+            out[i + 1] = 0;
+        }
+        fft.FFT(out, m, field, sel);
+    };
+    // v := v / Z_A mod f (degree < N, and < d if deg v < N), values on A in
+    // and out, where v holds a square (zero derivative) of degree < 2N, or,
+    // with general set, any polynomial of degree < N.
+    std::vector<Elem> dv;
+    auto reduce = [&](std::vector<Elem>& v, bool general) {
+        if (general) derivative(v, dv);
+        for (size_t j = 0; j < n; ++j) v[j] = field.Mul(v[j], inv_fa[j]);
+        derivative(v, q);
+        for (size_t j = 0; j < n; ++j) v[j] = field.Mul(q[j], fa[j]) ^ field.Mul(v[j], dfa[j]);
+        if (general) {
+            for (size_t j = 0; j < n; ++j) v[j] ^= dv[j];
+        }
+    };
+
+    std::vector<Wide> wide(8 * n, field.WideZero());
+    Elem bcoef = basis;
+    for (int i = 0; i < bits; ++i) {
+        Wide* w = wide.data() + (i % 8) * n;
+        for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(bcoef, ra[j]));
+        bcoef = field.Sqr(bcoef);
+        for (size_t j = 0; j < n; ++j) ra[j] = field.Sqr(ra[j]);
+        reduce(ra, false);
+    }
+    // X_Bits == x iff the Montgomery forms agree mod f, i.e. iff the
+    // reduction of their difference vanishes (on A, hence identically).
+    for (size_t j = 0; j < n; ++j) ra[j] ^= ra0[j];
+    reduce(ra, true);
+    for (size_t j = 0; j < n; ++j) {
+        if (ra[j] != 0) return 0;
+    }
+
+    acc.assign(8, std::vector<Elem>());
+    for (int r = 0; r < 8; ++r) {
+        for (size_t j = 0; j < n; ++j) ra[j] = field.Reduce(wide[r * n + j]);
+        reduce(ra, true);
+        fft.IFFT(ra, m, field, sel);
+#ifdef MINISKETCH_VERIFY
+        for (size_t j = d; j < n; ++j) CHECK_SAFE(ra[j] == 0);
+#endif
+        acc[r].assign(ra.begin(), ra.begin() + d);
+    }
+    return 1;
+}
+
+/** The tower scheme's traces from the eight bucket sums acc[r] (length
+ * d each): traces[k] = sum_r (z^k)^(2^r) * acc[r], stripped. */
+template<typename F>
+void CombineTowerTraces(const std::vector<std::vector<typename F::Elem>>& acc, size_t depths, typename F::Elem z, const F& field, std::vector<std::vector<typename F::Elem>>& traces) {
+    typedef typename F::Elem Elem;
+    typedef typename F::Wide Wide;
+    Elem zk = 1;
+    for (size_t k = 0; k < depths; ++k) {
+        Elem w[8];
+        w[0] = zk;
+        for (int r = 1; r < 8; ++r) w[r] = field.Sqr(w[r - 1]);
+        auto& t = traces[k];
+        const size_t d = t.size();
+        if (F::LAZY_REDUCE) {
+            for (size_t j = 0; j < d; ++j) {
+                Wide s = field.WideZero();
+                for (int r = 0; r < 8; ++r) s = field.WideXor(s, field.MulWide(w[r], acc[r][j]));
+                t[j] = field.Reduce(s);
+            }
+        } else {
+            for (int r = 0; r < 8; ++r) {
+                typename F::Multiplier mul(field, w[r]);
+                for (size_t j = 0; j < d; ++j) t[j] ^= mul(acc[r][j]);
+            }
+        }
+        zk = field.Mul(zk, z);
+    }
+    for (auto& t : traces) PolyStrip(t);
+}
+
 /** Compute, for the first depths split levels of the root finding
  * recursion on poly (monic, degree >= 3), the split traces
  * traces[k] = Tr(beta_k * x) mod poly, the split parameters betas[k] for
@@ -1265,13 +1459,21 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
             beta = field.Mul2(beta);
         }
     }
+    std::vector<std::vector<Elem>> acc;
+    if (tower && d >= MONT_ORBIT_MIN_DEGREE && TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) {
+        int res = MontgomeryOrbit(poly, basis, field, acc);
+        if (res == 0) return false;
+        if (res == 1) {
+            CombineTowerTraces(acc, depths, z, field, traces);
+            return true;
+        }
+    }
     std::vector<Elem> coef(depths);
     for (size_t k = 0; k < depths; ++k) coef[k] = betas[k];
     Elem bcoef = basis; // basis^(2^i), the tower scheme's single coefficient
     TraceMod<F> trace_mod(poly, field);
     std::vector<Elem> orbit{0, 1};
     std::vector<Wide> wide;
-    std::vector<std::vector<Elem>> acc;
     if (F::LAZY_REDUCE) {
         wide.assign(nacc * d, field.WideZero());
     } else {
@@ -1305,31 +1507,11 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
         }
     }
     if (tower) {
-        // traces[k] = sum_r (z^k)^(2^r) * Z_r.
-        Elem zk = 1;
-        for (size_t k = 0; k < depths; ++k) {
-            Elem w[8];
-            w[0] = zk;
-            for (int r = 1; r < 8; ++r) w[r] = field.Sqr(w[r - 1]);
-            auto& t = traces[k];
-            if (F::LAZY_REDUCE) {
-                for (size_t j = 0; j < d; ++j) {
-                    Wide s = field.WideZero();
-                    for (int r = 0; r < 8; ++r) s = field.WideXor(s, field.MulWide(w[r], acc[r][j]));
-                    t[j] = field.Reduce(s);
-                }
-            } else {
-                for (int r = 0; r < 8; ++r) {
-                    typename F::Multiplier mul(field, w[r]);
-                    for (size_t j = 0; j < d; ++j) t[j] ^= mul(acc[r][j]);
-                }
-            }
-            zk = field.Mul(zk, z);
-        }
+        CombineTowerTraces(acc, depths, z, field, traces);
     } else {
         for (size_t k = 0; k < depths; ++k) traces[k].swap(acc[k]);
+        for (auto& t : traces) PolyStrip(t);
     }
-    for (auto& t : traces) PolyStrip(t);
     return orbit.size() == 2 && orbit[0] == 0 && orbit[1] == 1;
 }
 
