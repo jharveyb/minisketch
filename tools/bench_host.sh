@@ -337,6 +337,20 @@ restore() {
 
     [ -n "$DRY_RUN" ] && { echo "(dry run: nothing changed)"; return 0; }
 
+    # cpupower can fail to widen a pinned min == max range (seen on an
+    # i7-4770: "Error setting new values", limits left pinned). Fall back to
+    # sysfs for any CPU whose limits differ: max, then min, then max again,
+    # which is valid from any starting range.
+    read_current
+    for c in "${CPUS[@]}"; do
+        [ -n "${smin[$c]:-}" ] && [ -n "${smax[$c]:-}" ] || continue
+        [ "${MIN[$c]:-}" = "${smin[$c]}" ] && [ "${MAX[$c]:-}" = "${smax[$c]}" ] && continue
+        local d="/sys/devices/system/cpu/cpu$c/cpufreq"
+        echo "${smax[$c]}" > "$d/scaling_max_freq" 2> /dev/null
+        echo "${smin[$c]}" > "$d/scaling_min_freq" 2> /dev/null
+        echo "${smax[$c]}" > "$d/scaling_max_freq" 2> /dev/null
+    done
+
     read_current
     [ -z "$sboost" ] || [ "$BOOST" = "$sboost" ] || warn "boost is $BOOST, recorded $sboost"
     for c in "${CPUS[@]}"; do
