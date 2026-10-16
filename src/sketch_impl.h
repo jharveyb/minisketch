@@ -2352,12 +2352,16 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
         if (!split) return {};
         // The roots' power sums Q_k (k = 1..2 * odd_power_sums->size()) from
         // the odd ones (Q_2k = Q_k^2), if given.
+        // Only built when the root is large enough to split by them, and
+        // only as far as the root's split can use (PowerSumSplit).
         std::vector<typename F::Elem> psum;
-        if (odd_power_sums) {
-            psum.resize(2 * odd_power_sums->size());
+        const size_t d = poly.size() - 1;
+        const bool use_psum = odd_power_sums && carry.tree && d >= PSUM_SPLIT_MIN;
+        if (use_psum) {
+            psum.resize(std::min(2 * odd_power_sums->size(), 3 * d + 64));
             for (size_t k = 1; k <= psum.size(); ++k) psum[k - 1] = (k & 1) ? (*odd_power_sums)[k / 2] : field.Sqr(psum[k / 2 - 1]);
         }
-        if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, poly.size() - 1, &betas, &carry, odd_power_sums ? &psum : nullptr)) return {};
+        if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, d, &betas, &carry, use_psum ? &psum : nullptr)) return {};
         CHECK_RETURN(poly.size() - 1 == roots.size(), {});
         return roots;
     }
