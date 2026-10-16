@@ -758,7 +758,7 @@ void TestBerlekampMasseyVsRef(const F& field, TestRand& rng, size_t iters, size_
     // recurrence with the squared connection polynomial past the prefix,
     // and a perturbed tail syndrome is rejected - for lengths on both sides
     // of the FFT threshold.
-    for (size_t count : {size_t(3), size_t(17), size_t(BM_VERIFY_FFT_MIN_DEGREE + 5)}) {
+    for (size_t count : {size_t(3), size_t(17), size_t(40), size_t(100), size_t(BM_VERIFY_FFT_MIN_DEGREE + 5)}) {
         if (count + 2 >= field_size) continue;
         size_t cap = count + 40 + rng.RandRange(40);
         auto roots = RandDistinctElems(rng, field, count);

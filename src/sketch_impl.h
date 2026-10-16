@@ -61,13 +61,13 @@
 #define MINISKETCH_BM_VERIFY_MIN_PREFIX 0
 #endif
 /* Minimum LFSR length for the additive-FFT tail verification, for fields
- * with a cheap, lazily-reducing scalar multiplication (CLMUL; below it, a
- * direct check with one carry-less product per term is faster, measured on
- * Zen 3, Haswell and Cortex-A76) and for table-based ones (generic, whose
+ * with a cheap, lazily-reducing scalar multiplication (CLMUL; below it, the
+ * lazy direct / Karatsuba middle-product checks are faster, measured on
+ * Haswell and Cortex-A76) and for table-based ones (generic, whose
  * pointwise FFT products are slow one-off multiplications; below it, a
- * Karatsuba/naive product check). */
+ * direct Multiplier-table check). */
 #ifndef MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE
-#define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE 192
+#define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE 512
 #endif
 #ifndef MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE
 #define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE 40
@@ -84,6 +84,16 @@
 #endif
 #ifndef MINISKETCH_ORBIT_NODE_FACTOR
 #define MINISKETCH_ORBIT_NODE_FACTOR 2
+#endif
+/* Lazy Karatsuba middle-product tail check (lazily-reducing fields): used
+ * for LFSR lengths in [KARA_MIN_DEGREE, FFT_MIN_DEGREE), below which the
+ * direct check wins (from ~32 on Haswell, ~96 on Cortex-A76); direct
+ * kernels at middle-product sizes <= MP_BASE. */
+#ifndef MINISKETCH_BM_VERIFY_KARA_MIN_DEGREE
+#define MINISKETCH_BM_VERIFY_KARA_MIN_DEGREE 64
+#endif
+#ifndef MINISKETCH_MP_BASE
+#define MINISKETCH_MP_BASE 16
 #endif
 #ifndef MINISKETCH_BM_VERIFY_MIN_TAIL
 #define MINISKETCH_BM_VERIFY_MIN_TAIL 32
@@ -103,6 +113,8 @@ static const size_t BM_VERIFY_MIN_PREFIX = MINISKETCH_BM_VERIFY_MIN_PREFIX;
 static const size_t BM_VERIFY_MIN_TAIL = MINISKETCH_BM_VERIFY_MIN_TAIL;
 static const size_t BM_VERIFY_FFT_MIN_DEGREE = MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE;
 static const size_t BM_VERIFY_FFT_MIN_DEGREE_TABLE = MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE;
+static const size_t BM_VERIFY_KARA_MIN_DEGREE = MINISKETCH_BM_VERIFY_KARA_MIN_DEGREE;
+static const size_t MP_BASE = MINISKETCH_MP_BASE;
 static const size_t ORBIT_MIN_DEGREE = MINISKETCH_ORBIT_MIN_DEGREE;
 static const size_t ORBIT_EXTRA_DEPTHS = MINISKETCH_ORBIT_EXTRA_DEPTHS;
 static const size_t ORBIT_NODE_FACTOR = MINISKETCH_ORBIT_NODE_FACTOR;
@@ -1527,6 +1539,48 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
     return roots;
 }
 
+/** Unreduced middle product for lazily-reducing fields:
+ * out[s] = sum_(k<n) c[k] * w[s+k] for s < n (w has 2n-1 entries), with
+ * transposed Karatsuba while n is even and above MP_BASE:
+ *     low  = alpha + MP(c0, w0 + w1),  high = alpha + MP(c1, w1 + w2),
+ *     alpha = MP(c0 + c1, w1),
+ * (c0, c1 the halves of c; w0, w1, w2 the length-(n-1) windows of w at
+ * offsets 0, n/2, n), i.e. three half-size middle products instead of
+ * four; below that, direct dot products. es must hold 4n elements. */
+template<typename F>
+void LazyMiddleProduct(const typename F::Elem* c, const typename F::Elem* w, size_t n, typename F::Wide* out, typename F::Elem* es, typename F::Wide* wsc, const F& field) {
+    typedef typename F::Wide Wide;
+    if (n <= MP_BASE || (n & 1)) {
+        for (size_t s = 0; s < n; ++s) {
+            Wide acc = field.WideZero();
+            for (size_t k = 0; k < n; ++k) acc = field.WideXor(acc, field.MulWide(c[k], w[s + k]));
+            out[s] = acc;
+        }
+        return;
+    }
+    const size_t h = n / 2, wl = 2 * h - 1;
+    typename F::Elem* cs = es;
+    typename F::Elem* ws = es + h;
+    typename F::Elem* rest = es + h + wl;
+    Wide* gamma = wsc;
+    Wide* wrest = wsc + h;
+    for (size_t k = 0; k < h; ++k) cs[k] = c[k] ^ c[h + k];
+    // alpha into out[0..h), beta = MP(c0, w0 + w1) into out[h..n), then
+    // low = alpha + beta and high = alpha (+ gamma below).
+    LazyMiddleProduct(cs, w + h, h, out, rest, wrest, field);
+    for (size_t t = 0; t < wl; ++t) ws[t] = w[t] ^ w[h + t];
+    LazyMiddleProduct(c, ws, h, out + h, rest, wrest, field);
+    for (size_t s = 0; s < h; ++s) {
+        Wide beta = out[h + s];
+        out[h + s] = out[s];
+        out[s] = field.WideXor(out[s], beta);
+    }
+    // gamma = MP(c1, w1 + w2), added to the high half.
+    for (size_t t = 0; t < wl; ++t) ws[t] = w[h + t] ^ w[2 * h + t];
+    LazyMiddleProduct(c + h, ws, h, gamma, rest, wrest, field);
+    for (size_t s = 0; s < h; ++s) out[h + s] = field.WideXor(out[h + s], gamma[s]);
+}
+
 /** Tail check of the early-terminating Berlekamp-Massey, on the odd
  * syndromes only: whether u[j] + sum_(a=1..L) conn[a]^2 * u[j-a] == 0 for all
  * j in [j0, j_end), where u[j] = S_(2j+1) and conn has degree L <= j0.
@@ -1536,9 +1590,11 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
  * past the converged prefix this is equivalent to conn generating every
  * remaining syndrome (see BerlekampMassey). Each block of positions is one
  * product conn^2 * window: with the additive FFT (conn^2 transformed once,
- * one forward and one inverse transform per block), the Karatsuba/naive
- * tiers, or - on lazily-reducing fields, for moderate L - a direct check at
- * one carry-less product per term. Stops at the first violated block. */
+ * one forward and one inverse transform per block), a direct
+ * Multiplier-table check (table-based fields), or - on lazily-reducing
+ * fields - a direct check at one carry-less product per term (small L) or
+ * lazy Karatsuba middle products (LazyMiddleProduct, moderate L). Stops at
+ * the first violated block. */
 template<typename F>
 bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const std::vector<typename F::Elem>& u, size_t j0, size_t j_end, const F& field) {
     typedef typename F::Elem Elem;
@@ -1547,6 +1603,42 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
     if (j0 >= j_end) return true;
     std::vector<Elem> conn2(L + 1);
     for (size_t a = 0; a <= L; ++a) conn2[a] = field.Sqr(conn[a]);
+    if (F::LAZY_REDUCE && L >= BM_VERIFY_KARA_MIN_DEGREE && L < BM_VERIFY_FFT_MIN_DEGREE) {
+        // Blocks of n positions as lazy Karatsuba middle products of the
+        // reversed, zero-padded conn^2 with windows of u, where
+        // n = b * 2^k >= L+1 with b <= MP_BASE (so the recursion halves
+        // exactly down to direct kernels).
+        typedef typename F::Wide Wide;
+        size_t b = L + 1, k = 0;
+        while (b > MP_BASE) {
+            b = (b + 1) / 2;
+            ++k;
+        }
+        const size_t n = b << k;
+        std::vector<Elem> crev(n, 0), win(2 * n - 1), es(4 * n);
+        for (size_t a = 0; a <= L; ++a) crev[n - 1 - a] = conn2[a];
+        std::vector<Wide> out(n), wsc(2 * n);
+        for (size_t p = j0; p < j_end; p += n) {
+            // The window is u[p - n + 1 .. p + n - 1]; interior blocks read
+            // it in place, edge blocks from a zero-padded copy.
+            const Elem* wp;
+            if (p >= n - 1 && p + n - 1 < j_end) {
+                wp = u.data() + (p - (n - 1));
+            } else {
+                for (size_t t = 0; t < 2 * n - 1; ++t) {
+                    size_t idx = p + t;
+                    win[t] = (idx >= n - 1 && idx - (n - 1) < j_end) ? u[idx - (n - 1)] : Elem(0);
+                }
+                wp = win.data();
+            }
+            LazyMiddleProduct(crev.data(), wp, n, out.data(), es.data(), wsc.data(), field);
+            const size_t cnt = std::min(n, j_end - p);
+            for (size_t s2 = 0; s2 < cnt; ++s2) {
+                if (field.Reduce(out[s2]) != 0) return false;
+            }
+        }
+        return true;
+    }
     if (F::LAZY_REDUCE && L < BM_VERIFY_FFT_MIN_DEGREE) {
         // Four positions at a time, so every coefficient load feeds four
         // accumulators.
