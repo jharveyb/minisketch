@@ -1693,6 +1693,7 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
         carry.t[l].resize(n);
         for (size_t j = 0; j < n; ++j) carry.t[l][j] = field.Reduce(wide_t[l * n + j]);
     }
+    std::vector<Wide>().swap(wide_t);
     carry.ga = mc->Values();
     for (size_t j = 0; j < n; ++j) ra[j] = field.Reduce(wide_all[j]);
     mc->ToNormal(ra, d, trace0);
@@ -2306,9 +2307,16 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
         to_factor(poly, trace_v, carry_poly);
         to_factor(tmp, tmp_v, carry_tmp);
     }
+    // Release this node's coset state before recursing: summed along the
+    // recursion path it would otherwise dominate the peak memory.
+    node_mc.reset();
+    std::vector<typename F::Elem>().swap(trace_v);
+    std::vector<typename F::Elem>().swap(tmp_v);
     // Now the stack is [... (trace) tmp ...]. First we factor tmp (at pos = pos+1), and then
     // we factor trace (at pos = pos).
     if (!RecFindRoots(stack, pos + 1, roots, fully_factorizable, depth, randv, field, orbit, orbit_degree, betas, &carry_tmp, psum_split ? &psum1 : nullptr)) return false;
+    carry_tmp = MontCarry<F>();
+    std::vector<typename F::Elem>().swap(psum1);
     // The stack position pos contains trace, the polynomial with all of poly's roots which (after
     // multiplication with randv) have trace 0. This is never the case for irreducible factors
     // (which always end up in tmp), so we can set fully_factorizable to true when recursing.
@@ -2358,7 +2366,9 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
         const size_t d = poly.size() - 1;
         const bool use_psum = odd_power_sums && carry.tree && d >= PSUM_SPLIT_MIN;
         if (use_psum) {
-            psum.resize(std::min(2 * odd_power_sums->size(), 3 * d + 64));
+            size_t sq = 1;
+            while (sq * sq < d) ++sq;
+            psum.resize(std::min(2 * odd_power_sums->size(), 2 * d + 4 * sq + 64));
             for (size_t k = 1; k <= psum.size(); ++k) psum[k - 1] = (k & 1) ? (*odd_power_sums)[k / 2] : field.Sqr(psum[k / 2 - 1]);
         }
         if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, d, &betas, &carry, use_psum ? &psum : nullptr)) return {};
