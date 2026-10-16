@@ -13,25 +13,28 @@ Decoding a sketch of capacity `c` containing `n` differences over
 GF(2<sup>m</sup>) runs three stages (`src/sketch_impl.h`):
 
 1. **Syndrome reconstruction** — O(c) squarings.
-2. **Berlekamp-Massey** — adaptive O(c·n) multiplications: the inner loops
-   only touch the current LFSR length, so the cost tracks the *actual* number
-   of differences, not the capacity.
-3. **Root finding** (`RecFindRoots`, the Berlekamp Trace Algorithm) — the
-   dominant stage. Each node of the recursion at degree `d` computes a
-   symbolic trace: `Bits-1` iterations of squaring + reduction modulo the
-   node's polynomial. With schoolbook reduction that is ~`m·d²`
-   multiplications per node; the per-node GCD and division are a further
-   ~`d²`, i.e. `1/m` of the trace cost. Summing over the (roughly binary)
-   recursion tree gives ~`2·m·n²` total multiplications, **dominated by the
-   top 2–3 recursion levels**: level `k` costs ~`m·n²/2^k`.
+2. **Berlekamp-Massey** — O(n²) for the LFSR itself (only the odd steps;
+   see "Frobenius-structured Berlekamp-Massey" below) plus an
+   independent-position check of the remaining O(c) recurrence constraints
+   once the LFSR has converged: O(c·n) single carry-less products, or
+   O(c log n) with the additive FFT for large n. Before 2026-10 this stage
+   was a serial O(c·n) loop over all 2c syndromes, which dominated decode
+   whenever n ≪ c.
+3. **Root finding** (`FindRoots`/`RecFindRoots`, the Berlekamp Trace
+   Algorithm). Every split needs the trace Tr(βx) mod the node polynomial,
+   i.e. the Frobenius orbit x<sup>2<sup>i</sup></sup> mod f for i < m: `m−1`
+   squarings + reductions. Since 2026-10 that orbit is computed **once, at
+   the root** (degree n), and the traces of the top ~log₂m+2 split levels
+   are linear combinations of it; deeper nodes need one division each.
+   Cost: ~`m·n²/2` carry-less products for the root chain (square-table
+   reducer, lazy reduction) plus ~`n²` per orbit level for the node
+   divisions, plus the per-node GCD and division (~`n²` per level).
+   Previously every node ran its own chain, ~`m·n²` in total (level `k`
+   costing ~`m·n²/2^k`).
 
-Two consequences shape everything below:
-
-* Speedups to the *top-of-tree* reduction cost translate almost 1:1 into
-  total decode time for large `n`.
-* Speedups to *small-degree nodes* only matter when `n` itself is small
-  (shallow tree) — but that is exactly the low-latency regime that set
-  reconciliation protocols like Erlay live in.
+The root chain is now the dominant cost of decode for n ≳ 64 (~50–60%),
+and on Haswell it runs at the PCLMULQDQ throughput limit; see "Remaining"
+below for why it is hard to shorten.
 
 A note on split retries: a failed trace split at degree `d` has probability
 ~2<sup>1−d</sup>, so retries are essentially free above degree ~8 and only
@@ -225,7 +228,8 @@ Recorded here so it is not re-derived.
 ### Decode cost at partial error counts
 
 Decode cost tracks the *actual* number of differences `e`, not the
-capacity: Berlekamp-Massey is adaptive O(e·n), and the locator degree —
+capacity: Berlekamp-Massey is adaptive O(e·n) (as of this measurement;
+see the 2026-10 section for the current BM), and the locator degree —
 which drives the whole root-finding stage and hence the FFT tier — equals
 `e`. Measured with errors at a fraction of the syndrome count (64-bit
 CLMUL, same 3-way protocol; base → FFT → cached, speedup = base/cached):
@@ -396,8 +400,10 @@ on 64-bit CLMUL**, 350 → 152 ms (2.31×) on 32-bit CLMUL.
 
 ### Remaining in this area
 
-* **Constant-factor half-gcd work** is the lever to push the crossover
-  below 1024 and grow the 4096 win: middle products for the matrix-vector
+* (Superseded: after the 2026-10 lazy-reduction series the plain Euclid
+  loop beats the half-gcd up to degree 4096 and `HGCD_CUTOFF` is 4096;
+  see below.) **Constant-factor half-gcd work** is the lever to push the
+  crossover down again: middle products for the matrix-vector
   applications, transform caching across the 2×2 matrix recursion (the
   vdH / eprint 2024/644 trick; `Prepare`/`MulLowPrepared` is the hook),
   and a scratch pool for the per-call matrix/temporary allocations.
@@ -418,6 +424,179 @@ NTL `GF2EX` HalfGCD (<https://github.com/libntl/ntl>),
 <https://github.com/vneiger/pml>,
 <https://github.com/bitcoin-core/secp256k1/blob/master/doc/safegcd_implementation.md>,
 <https://github.com/sipa/safegcd-bounds>.
+
+## Implemented: Frobenius-structured BM, shared trace orbit, lazy reduction (2026-10)
+
+Target: high capacity (1024+) with a low-to-medium number of differences
+(32–256+). In that regime the old decoder spent most of its time in a
+Berlekamp-Massey pass over all 2c syndromes and in per-node trace chains.
+Everything below is exact: decode returns the same result, including the
+same failure behaviour, as before.
+
+### Frobenius-structured Berlekamp-Massey
+
+The syndromes are power sums in characteristic 2, so s<sub>2k</sub> =
+s<sub>k</sub>² (equivalently S(x)² = S<sub>even</sub>(x)). Two consequences:
+
+* **Even steps have zero discrepancy.** This is the classical binary-BCH
+  simplification (Berlekamp 1968). It holds for every Frobenius-structured
+  sequence, not only genuine sketches, so BM skips those steps. Verified
+  exhaustively against a textbook oracle over GF(4)…GF(256), plus the
+  property tests.
+* **Early termination with an exact tail check.** Once the LFSR length L
+  stops growing, the connection polynomial Λ is checked against all
+  remaining *odd*-indexed constraints at once. The even ones then follow
+  from S² = S<sub>even</sub>:
+  [x<sup>2j</sup>](ΛS) = ([x<sup>j</sup>](ΛS))² + [x<sup>2j</sup>](Λ·(ΛS mod x<sup>L+1</sup>)),
+  and both terms vanish for j > L once Λ generates the prefix (induction
+  over j, as checking starts past 2L). So the full iteration would see zero
+  discrepancies through the tail and return the same Λ. That includes
+  rejecting a sketch with more than `max_count` differences, since a
+  failed check just resumes the iteration.
+
+The tail check (`BerlekampMasseyVerifyTail`) has two tiers:
+* **FFT.** Split by parity, the constraints are coefficients of
+  Λ<sub>e</sub>S<sub>e</sub> + xΛ<sub>o</sub>S<sub>o</sub> (in y = x²): two
+  half-size products per block. The additive FFT prepares Λ's halves once
+  and sums both products in the evaluation domain, so each block costs one
+  inverse transform.
+* **Direct.** On lazily-reducing fields, a direct check costs one
+  carry-less product per term, has no serial dependency, and shares each
+  coefficient load across 4 positions. It is faster up to L ≈ 192.
+
+BM goes from a serial O(c·n) to O(n²) + O(c·n) independent products, and
+it builds Multipliers only for the processed prefix. On the generic
+fields that was a 2 KB table per syndrome: 16 MB at capacity 4096, a real
+cost on small caches.
+
+For table-based (generic) fields, the additive FFT now builds the
+Multiplier tables of its 64 lowest twiddles once per engine instead of once
+per block per transform. That halved generic BM time on a Pi 5.
+
+### One Frobenius orbit for the whole root-finding tree
+
+All nodes at depth k split with the same β<sub>k</sub> = basis·2<sup>k</sup>,
+and every node g divides the root polynomial f, so
+Tr(β<sub>k</sub>x) mod g = (Tr(β<sub>k</sub>x) mod f) mod g.
+`ComputeTraceOrbit` generates X<sub>i</sub> = x<sup>2<sup>i</sup></sup> mod f
+once (m−1 modular squarings, the cost of one trace) and accumulates
+Tr(β<sub>k</sub>x) mod f = Σ<sub>i</sub> β<sub>k</sub><sup>2<sup>i</sup></sup> X<sub>i</sub>
+for the first log₂m+2 depths on the fly. Only those accumulators stay live,
+not the m orbit elements. A node of degree d<sub>g</sub> with
+2·deg f ≤ d<sub>g</sub>·m then needs a single division instead of a
+reducer build plus m−1 squarings; smaller nodes keep the old path.
+
+One more squaring gives x<sup>2<sup>m</sup></sup> mod f, which equals x
+iff f is square-free and splits completely. That is an **exact
+factorizability test at the root**: undecodable sketches fail before any
+splitting. (This differs from the "Frobenius-power precomputation for
+trace retries" demoted below: that cached per node for retries, while this
+shares the root's orbit across all nodes of a depth.)
+
+Why the root chain stays: any split needs a nonconstant GF(2)-valued
+function of the roots. Such a function is a trace and involves every
+Frobenius power. The routes around the chain all cost more than m cheap
+squarings at these degrees, because squaring is linear in characteristic
+2: subfield/relative traces still need m powers in total, and
+modular-composition doubling (Brent–Kung) or Hankel solves from the
+sketch's extra syndromes cost more. The power-sum (dual) representation,
+where squaring is free at even indices, is circular by the transposition
+principle.
+
+### Lazy modular reduction (CLMUL/PMULL fields)
+
+Reduction modulo the field polynomial is GF(2)-linear, so a sum of
+carry-less products can be XOR-accumulated in 128 bits and reduced once.
+That is one CLMUL per term instead of three. The CLMUL `GenField` now
+exposes `Wide`/`MulWide`/`WideXor`/`WideFrom`/`Reduce` (`Mul` is
+unchanged); the generic fields expose trivial versions with
+`LAZY_REDUCE = false` and keep their Multiplier loops. Uses:
+
+* **Square-table reducer** (the root chain and small-node traces):
+  register-blocked over 8 output columns, with the table stored
+  column-block-major so each block streams contiguous memory. The
+  row-major table had one cache line per row 8·d bytes apart, more
+  concurrent streams than the prefetchers track. On Haswell this loop now
+  runs at ~2.1 cycles per product, the PCLMULQDQ throughput limit.
+* **BM discrepancy and tail check**, the orbit accumulation, and the
+  schoolbook product (convolution order, register accumulator).
+* **Division in dot-product form** (`LazyDivRem`): each quotient and
+  remainder coefficient is one register-accumulated dot product, reduced
+  once, with no accumulator array. DivMod and Euclid both use it.
+* **Normalization-free Euclid.** The divisor's inverse leading coefficient
+  is folded into the quotient instead of rescaling the divisor every step.
+  Below degree 128, normal steps (quotient degree 1) use the
+  inversion-free pseudo-remainder β²a − (βa<sub>n</sub>x + βa<sub>n−1</sub> −
+  a<sub>n</sub>b<sub>m−1</sub>)b, trading one product per coefficient for
+  a field inversion.
+
+The cheaper schoolbook primitives moved several crossovers:
+* Table/FFT reducer: 256 → 704 for CLMUL fields (~700 on Haswell, above
+  768 on Cortex-A76).
+* `HGCD_CUTOFF`: 1024 → 4096; the lazy Euclid beats the half-gcd at every
+  degree up to 4096.
+* BM FFT verification: L ≥ 192 on CLMUL fields, L ≥ 40 on generic fields.
+
+### Measured
+
+Interleaved A/B, min over rounds (`bench --decode-only`), 64-bit field
+unless noted, original tip (before this series) → after the HGCD cutoff
+commit. The inversion-free Euclid step adds a further 5–10% at
+1024/32…256 on both machines.
+
+| capacity/differences | i7-4770 CLMUL | Pi 5 (A76) PMULL |
+|---|---|---|
+| 1024/32 | 0.319 → 0.098 ms (3.3×) | 0.576 → 0.139 ms (4.1×) |
+| 1024/64 | 0.899 → 0.250 ms (3.6×) | 1.686 → 0.341 ms (4.9×) |
+| 1024/128 | 2.80 → 0.76 ms (3.7×) | 5.33 → 1.03 ms (5.2×) |
+| 1024/256 | 8.15 → 2.58 ms (3.2×) | 14.91 → 3.37 ms (4.4×) |
+| 1024/512 | 25.3 → 9.1 ms (2.8×) | 46.8 → 11.1 ms (4.2×) |
+| 2048/64 | 1.157 → 0.288 ms (4.0×) | 2.180 → 0.396 ms (5.5×) |
+| 2048/256 | 9.11 → 2.76 ms (3.3×) | 16.88 → 3.61 ms (4.7×) |
+| 4096/32 | 0.694 → 0.166 ms (4.2×) | 1.341 → 0.238 ms (5.6×) |
+| 4096/64 | 1.666 → 0.374 ms (4.5×) | 3.178 → 0.513 ms (6.2×) |
+| 4096/128 | 4.30 → 0.99 ms (4.4×) | 8.27 → 1.36 ms (6.1×) |
+| 4096/256 | 11.14 → 2.91 ms (3.8×) | 20.83 → 3.87 ms (5.4×) |
+| 1024/1024 | 67.3 → 21.8 ms (3.1×) | 122.6 → 35.8 ms (3.4×) |
+| 32-bit 1024/64 | 0.780 → 0.187 ms (4.2×) | 0.693 → 0.228 ms (3.0×) |
+| 32-bit 4096/256 | 9.96 → 2.08 ms (4.8×) | 9.06 → 2.43 ms (3.7×) |
+| generic 1024/64 | 4.00 → 1.89 ms (2.1×) | 5.86 → 2.88 ms (2.0×) |
+| generic 4096/64 | 9.82 → 3.13 ms (3.1×) | 12.65 → 4.84 ms (2.6×) |
+
+Stage split at 1024/256 on the i7 afterwards: the root chain is ~50%,
+node divisions ~14%, inversions ~6%, orbit accumulation and reducer
+construction ~5% each, BM ~6%.
+
+### Measured negative results in this series
+
+* **Lazy-Karatsuba reciprocal reducer for the chain.** The Frobenius-sparse
+  first Barrett product splits into two half-size products, with unreduced
+  Karatsuba down to a schoolbook base of 8–32. It was slower than the
+  streaming lazy table at every degree on the i7 (n=128 1.11 vs 0.80 ms,
+  n=256 3.29 vs 2.66 ms, n=1024 29.5 vs 22.4 ms). With base b,
+  M(n) = (n/b)<sup>1.585</sup>b², so at d = 256 the three products cost
+  ~34.5k CLMULs (b = 16), against d²/2 = 32k for the table plus no
+  recursion overhead. The old non-lazy Karatsuba reciprocal path (FFT tier
+  disabled) was worse still.
+* **Reciprocal (FFT) reducer on generic fields**, even with the cached
+  twiddle tables: the pointwise products are slow one-off GFMuls. At
+  1024/256 on the Pi, 22.0 vs 15.1 ms for the table.
+* **Orbit node-factor / depth retune** after the lazy division: flat
+  within ±3%.
+
+### Remaining in this area
+
+* **Lehmer-style blocked Euclid**: compute k quotient steps from the top
+  2k coefficients and apply the composed 2×2 matrix in one lazy pass. That
+  cuts the remainder reductions (half of the remaining GCD cost) by ~k/2.
+* **Lazy square-table construction**: the shift-and-fold builds 3 CLMULs
+  per entry today; a two-step fold with lazy accumulation needs ~2.
+* **Orbit-node divisions at n ≥ 2048** would benefit from fast (FFT)
+  remainders at the top levels (`FastDivMod` currently never engages
+  there).
+* The **chain itself** is at the hardware throughput bound on Haswell.
+  Shortening it needs a cheaper Frobenius than modular squaring; see
+  above for why the obvious routes do not pay.
 
 ## Demoted ideas (investigated, not worth it)
 
