@@ -1212,40 +1212,245 @@ typename F::Elem SubfieldGenerator8(const F& field) {
     }
 }
 
-/** Frobenius orbit sums by Montgomery reduction on one coset of the
- * additive-FFT subspace.
+/* ---------- Montgomery arithmetic on additive-FFT cosets ----------
  *
- * For monic poly = f of degree d, with N = 2^m >= d, let A be a coset of
- * the transform subspace W_m (AdditiveFFT::FFT's sel) and Z_A(x) its
- * vanishing polynomial: degree N, and in the Cantor basis Z_A(x) =
- * sum_(j subset of m) x^(2^j) + c, so its formal derivative is Z_A' = 1.
- * Every residue r is held in Montgomery form r*Z_A mod f as a polynomial of
- * degree < N, represented by its N values on A. A squaring
- * r -> r^2 / Z_A mod f is
- *     q = r^2 / f mod Z_A        (pointwise on A),
- *     r' = (r^2 + q*f) / Z_A,
- * an exact division with deg r' < N since deg(r^2 + q*f) < 2N. On A both
- * sides of h = r^2 + q*f = r' * Z_A vanish; differentiating,
- * h' = r'' * Z_A + r' * Z_A' gives r'(w) = h'(w) for w in A, and in
- * characteristic 2 (r^2)' = 0, so
- *     r'(w) = q'(w) * f(w) + q(w) * f'(w).
- * Only q' is not available pointwise: interpolating q (IFFT) and
- * evaluating its formal derivative (FFT) are the two size-N transforms of
- * a squaring, against roughly eight for the reciprocal (Barrett) reducer,
- * whose products have length up to 2d - 1.
+ * For a monic g of degree <= N = 2^m and a coset C = W_m + eta_(b*2^m) of
+ * the additive-FFT subspace (AdditiveFFT::FFT with block b), let Z_C be the
+ * vanishing polynomial of C: in the Cantor basis
+ *     Z_C(x) = sum_(j subset of m) x^(2^j) + eta_b
+ * (the subspace polynomial S^m(x), S(x) = x^2 + x, which maps
+ * eta_(b*2^m + j) to eta_b), monic of degree N with formal derivative
+ * Z_C' = 1. If g has no root on C, Z_C is invertible mod g, and a residue r
+ * is held in Montgomery form r*Z_C mod g as a polynomial of degree < N,
+ * represented by its N values on C. The Montgomery reduction of a
+ * polynomial a,
+ *     q = a / g mod Z_C          (pointwise on C),
+ *     r = (a + q*g) / Z_C        (exact; r = a / Z_C mod g),
+ * has deg r < N if deg a < 2N, and deg r < deg g if deg a < N. On C both
+ * sides of h = a + q*g = r * Z_C vanish; differentiating,
+ * h' = r' * Z_C + r * Z_C' gives r(w) = h'(w) = a'(w) + q'(w)*g(w) +
+ * q(w)*g'(w) for w in C. Only q' (and a', unless a is a square, whose
+ * derivative is 0 in characteristic 2) is not available pointwise:
+ * interpolating q and evaluating its formal derivative are the two size-N
+ * transforms of a modular squaring, against roughly eight for the
+ * reciprocal (Barrett) reducer, whose products have length up to 2*deg g.
+ *
+ * Halving the coset: C is the union of its halves C0 (block 2b) and C1
+ * (block 2b+1) of W_(m-1), with Z_C = Z_C0 * Z_C1 and Z_C0 = 1 on C1. So for
+ * a factor g of the modulus with deg g <= N/2, the Montgomery form v of a
+ * residue T on C (v = T*Z_C mod g as well) gives the one on C1 as
+ *     v / Z_C0 mod g = (v + q*g) / Z_C0,  q = v / g mod Z_C0,
+ * whose values on C1 are v + q*g pointwise: two size-N/2 transforms carry
+ * a residue from a node of the root-finding tree to its child. */
+
+/** out = 1 / in elementwise (Montgomery's batch inversion); false if some
+ * element is 0. */
+template<typename F>
+bool BatchInvert(const std::vector<typename F::Elem>& in, std::vector<typename F::Elem>& out, const F& field) {
+    typedef typename F::Elem Elem;
+    const size_t n = in.size();
+    out.resize(n);
+    Elem prod = 1;
+    for (size_t j = 0; j < n; ++j) {
+        if (in[j] == 0) return false;
+        out[j] = prod;
+        prod = field.Mul(prod, in[j]);
+    }
+    prod = field.Inv(prod);
+    for (size_t j = n; j-- > 0; ) {
+        out[j] = field.Mul(out[j], prod);
+        prod = field.Mul(prod, in[j]);
+    }
+    return true;
+}
+
+/** Montgomery arithmetic modulo a monic g on one coset (see above). */
+template<typename F>
+class MontCoset {
+    typedef typename F::Elem Elem;
+    const AdditiveFFT<F>& fft;
+    const F& field;
+    std::vector<Elem> ga, inv_ga, dga, q, da, tmp;
+
+public:
+    const int m;
+    const size_t block, n;
+
+    MontCoset(const AdditiveFFT<F>& fft_in, const F& field_in, int m_in, size_t block_in) : fft(fft_in), field(field_in), m(m_in), block(block_in), n(size_t(1) << m_in) {}
+
+    /** Z_C(0) = eta_b, the coset's offset under S^m. */
+    static Elem Offset(const AdditiveFFT<F>& fft, size_t block) {
+        Elem e = 0;
+        for (size_t k = 0; block >> k; ++k) {
+            if ((block >> k) & 1) e ^= fft.Basis()[k];
+        }
+        return e;
+    }
+
+    /** out = the values of g (monic, degree <= 2^m) on coset (m, block). */
+    static void Eval(const AdditiveFFT<F>& fft, const F& field, int m, size_t block, const std::vector<Elem>& g, std::vector<Elem>& out) {
+        const size_t n = size_t(1) << m, d = g.size() - 1;
+        CHECK_SAFE(d <= n);
+        out.assign(n, 0);
+        std::copy(g.begin(), g.begin() + std::min(d + 1, n), out.begin());
+        if (d == n) {
+            // Reduce mod Z_C first: subtract the monic Z_C.
+            for (int j = 0; j < m; ++j) {
+                if ((m & j) == j) out[size_t(1) << j] ^= 1;
+            }
+            out[0] ^= Offset(fft, block);
+        }
+        fft.ToNovel(out, m);
+        fft.NovelFFT(out, m, field, block);
+    }
+
+    /** Set the modulus g (monic, degree <= 2^m), optionally with its values
+     *  on the coset precomputed. False if g has a root on the coset. */
+    bool SetModulus(const std::vector<Elem>& g, const std::vector<Elem>* g_values = nullptr) {
+        if (g_values) {
+            ga = *g_values;
+        } else {
+            Eval(fft, field, m, block, g, ga);
+        }
+        if (!BatchInvert(ga, inv_ga, field)) return false;
+        dga.assign(n, 0);
+        for (size_t i = 1; i < g.size(); i += 2) dga[i - 1] = g[i];
+        fft.ToNovel(dga, m);
+        fft.NovelFFT(dga, m, field, block);
+        return true;
+    }
+
+    const std::vector<Elem>& Values() const { return ga; }
+
+    /** out = the values of the formal derivative of the polynomial of degree
+     *  < 2^m with values v. */
+    void Derivative(const std::vector<Elem>& v, std::vector<Elem>& out) {
+        tmp = v;
+        fft.NovelIFFT(tmp, m, field, block);
+        AdditiveFFT<F>::NovelDerivative(tmp, m, out);
+        fft.NovelFFT(out, m, field, block);
+    }
+
+    /** v := v / Z_C mod g, values in and out. With square set, v must hold
+     *  a square of degree < 2^(m+1) (the result has degree < 2^m), else any
+     *  polynomial of degree < 2^m (the result has degree < deg g). */
+    void Reduce(std::vector<Elem>& v, bool square) {
+        if (!square) Derivative(v, da);
+        for (size_t j = 0; j < n; ++j) v[j] = field.Mul(v[j], inv_ga[j]);
+        Derivative(v, q);
+        for (size_t j = 0; j < n; ++j) v[j] = field.Mul(q[j], ga[j]) ^ field.Mul(v[j], dga[j]);
+        if (!square) {
+            for (size_t j = 0; j < n; ++j) v[j] ^= da[j];
+        }
+    }
+
+    /** v := v^2 / Z_C mod g: Montgomery squaring. */
+    void Square(std::vector<Elem>& v) {
+        for (size_t j = 0; j < n; ++j) v[j] = field.Sqr(v[j]);
+        Reduce(v, true);
+    }
+
+    /** Values v of the Montgomery form of a residue to its coefficients
+     *  (normal form, degree < deg g = d): v is destroyed. */
+    void ToNormal(std::vector<Elem>& v, size_t d, std::vector<Elem>& out) {
+        Reduce(v, false);
+        fft.NovelIFFT(v, m, field, block);
+        fft.FromNovel(v, m);
+#ifdef MINISKETCH_VERIFY
+        for (size_t j = d; j < n; ++j) CHECK_SAFE(v[j] == 0);
+#endif
+        out.assign(v.begin(), v.begin() + d);
+        PolyStrip(out);
+    }
+};
+
+/** Shared state of the Montgomery root-finding tree: the transform tables
+ * and the tower scheme's GF(2^8) generator z (see ComputeTraceOrbit). */
+template<typename F>
+struct MontTree {
+    AdditiveFFT<F> fft;
+    typename F::Elem z;
+};
+
+/** The relative trace T = Tr_(GF(2^Bits)/GF(2^8))(basis * x) modulo a node
+ * polynomial of the root-finding tree, in Montgomery form on a coset (see
+ * above). The split trace of tower depth k < 8 at the node is
+ * Tr(basis * z^k * x) = Tr_(GF(2^8)/GF(2))(z^k * T) = sum_(r<8) (z^k T)^(2^r),
+ * seven modular squarings. */
+template<typename F>
+struct MontCarry {
+    const MontTree<F>* tree = nullptr;
+    int m = 0;
+    size_t block = 0;
+    std::vector<typename F::Elem> v;  //!< T's Montgomery form on the coset
+    std::vector<typename F::Elem> ga; //!< the node polynomial on the coset, if computed
+};
+
+/** Carry the parent's T to its factor g (monic, 3 <= deg g < parent's
+ * degree): halve the coset while deg g fits in the half. */
+template<typename F>
+void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F::Elem>& g, MontCarry<F>& child, const F& field) {
+    typedef typename F::Elem Elem;
+    const AdditiveFFT<F>& fft = parent.tree->fft;
+    const size_t d = g.size() - 1;
+    child.tree = parent.tree;
+    child.m = parent.m;
+    child.block = parent.block;
+    child.v = parent.v;
+    child.ga.clear();
+    std::vector<Elem> g0, inv_g0, q;
+    while (child.m > 1 && d <= (size_t(1) << (child.m - 1))) {
+        const int mh = child.m - 1;
+        const size_t h = size_t(1) << mh, b0 = 2 * child.block, b1 = b0 + 1;
+        MontCoset<F>::Eval(fft, field, mh, b0, g, g0);
+        MontCoset<F>::Eval(fft, field, mh, b1, g, child.ga);
+        // g divides the root polynomial, which has no root on the root
+        // coset, of which every descendant coset is a subset.
+        bool ok = BatchInvert(g0, inv_g0, field);
+        CHECK_SAFE(ok);
+        (void)ok;
+        q.resize(h);
+        for (size_t j = 0; j < h; ++j) q[j] = field.Mul(child.v[j], inv_g0[j]);
+        fft.NovelIFFT(q, mh, field, b0);
+        fft.NovelFFT(q, mh, field, b1);
+        for (size_t j = 0; j < h; ++j) q[j] = child.v[h + j] ^ field.Mul(q[j], child.ga[j]);
+        child.v.swap(q);
+        child.m = mh;
+        child.block = b1;
+    }
+}
+
+/** out = Tr(basis * z^k * x) mod g in normal form, from g's carry. */
+template<typename F>
+bool MontNodeTrace(const MontCarry<F>& carry, const std::vector<typename F::Elem>& g, typename F::Elem zk, std::vector<typename F::Elem>& out, const F& field) {
+    typedef typename F::Elem Elem;
+    MontCoset<F> mc(carry.tree->fft, field, carry.m, carry.block);
+    if (!mc.SetModulus(g, carry.ga.empty() ? nullptr : &carry.ga)) return false;
+    std::vector<Elem> y(mc.n), acc(mc.n);
+    for (size_t j = 0; j < mc.n; ++j) acc[j] = y[j] = field.Mul(zk, carry.v[j]);
+    for (int r = 1; r < 8; ++r) {
+        mc.Square(y);
+        for (size_t j = 0; j < mc.n; ++j) acc[j] ^= y[j];
+    }
+    mc.ToNormal(acc, g.size() - 1, out);
+    return true;
+}
+
+/** Frobenius orbit sums by Montgomery reduction on a coset (see above).
  *
  * As in ComputeTraceOrbit's tower scheme, with X_i = x^(2^i) mod f,
- * acc[r] = sum_(i = r mod 8) basis^(2^i) * X_i is accumulated (on A, in
- * Montgomery form); one more reduction of each, followed by an IFFT,
- * returns it in normal form with degree < d. X_Bits == x (full
- * factorizability) is tested by reducing the difference of the Montgomery
- * forms.
+ * acc[r] = sum_(i = r mod 8) basis^(2^i) * X_i is accumulated (on the
+ * coset, in Montgomery form) while x is squared Bits times, and returned
+ * in normal form. X_Bits == x (full factorizability) is tested by reducing
+ * the difference of the Montgomery forms. If carry is given, it receives
+ * acc[0] = T in Montgomery form (with tree->fft as the transform engine,
+ * which this function extends).
  *
- * Requires f to have no root on A (1/f on A); the four cosets of W_m in
+ * Requires f to have no root on the coset; the four cosets of W_m in
  * W_(m+2) are tried in turn. Returns 1 (factorizable, acc filled), 0 (not
  * factorizable), or -1 when not applicable (caller falls back). */
 template<typename F>
-int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, const F& field, std::vector<std::vector<typename F::Elem>>& acc) {
+int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, const F& field, std::vector<std::vector<typename F::Elem>>& acc, AdditiveFFT<F>& fft, MontCarry<F>* carry) {
     typedef typename F::Elem Elem;
     typedef typename F::Wide Wide;
     const size_t d = poly.size() - 1;
@@ -1254,90 +1459,30 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
     while ((size_t(1) << m) < d) ++m;
     if (m + 2 > bits) return -1;
     const size_t n = size_t(1) << m;
-    AdditiveFFT<F> fft;
     fft.Extend(field, m + 2);
-    const std::vector<Elem>& beta = fft.Basis();
-    std::vector<Elem> fa, inv_fa(n), dfa(n, 0), q;
-    unsigned sel = 0;
-    bool found = false;
-    for (unsigned s : {1u, 2u, 3u, 0u}) {
-        // f mod Z_A (degree < N): when d == N, subtract the monic Z_A, whose
-        // constant term is Z_(W_m)(s_A) = S^m(s_A) with S(x) = x^2 + x,
-        // which maps beta_m to beta_0 = 1 and beta_(m+1) to beta_1.
-        fa.assign(n, 0);
-        std::copy(poly.begin(), poly.begin() + std::min(d + 1, n), fa.begin());
-        if (d == n) {
-            for (int j = 0; j < m; ++j) {
-                if ((m & j) == j) fa[size_t(1) << j] ^= 1;
-            }
-            fa[0] ^= Elem((s & 1) ? 1 : 0) ^ ((s & 2) ? beta[1] : 0);
-        }
-        fft.FFT(fa, m, field, s);
-        // Batch inversion (Montgomery's trick), failing on a root in A.
-        Elem prod = 1;
-        bool ok = true;
-        for (size_t j = 0; j < n; ++j) {
-            if (fa[j] == 0) {
-                ok = false;
-                break;
-            }
-            inv_fa[j] = prod;
-            prod = field.Mul(prod, fa[j]);
-        }
-        if (!ok) continue;
-        prod = field.Inv(prod);
-        for (size_t j = n; j-- > 0; ) {
-            inv_fa[j] = field.Mul(inv_fa[j], prod);
-            prod = field.Mul(prod, fa[j]);
-        }
-        sel = s;
-        found = true;
-        break;
+    std::unique_ptr<MontCoset<F>> mc;
+    for (size_t b : {1, 2, 3, 0}) {
+        mc.reset(new MontCoset<F>(fft, field, m, b));
+        if (mc->SetModulus(poly)) break;
+        mc.reset();
     }
-    if (!found) return -1;
-    // f' on A.
-    for (size_t i = 1; i <= d; i += 2) dfa[i - 1] = poly[i];
-    fft.FFT(dfa, m, field, sel);
+    if (!mc) return -1;
 
-    // Montgomery form of x: x * Z_A mod f, on A.
+    // Montgomery form of x: x * Z_C mod f.
     std::vector<Elem> ra;
     {
         std::vector<Elem> c(n + 2, 0), quot;
         for (int j = 0; j <= m; ++j) {
             if ((m & j) == j) c[(size_t(1) << j) + 1] = 1;
         }
-        c[1] ^= Elem((sel & 1) ? 1 : 0) ^ ((sel & 2) ? beta[1] : 0);
+        c[1] ^= MontCoset<F>::Offset(fft, mc->block);
         FastDivMod(poly, c, quot, field, 32);
         c.resize(n, 0);
         ra.swap(c);
-        fft.FFT(ra, m, field, sel);
+        fft.ToNovel(ra, m);
+        fft.NovelFFT(ra, m, field, mc->block);
     }
     const std::vector<Elem> ra0 = ra;
-
-    // Values on A of the formal derivative of the polynomial (degree < N)
-    // with values v on A: interpolate, differentiate, evaluate.
-    auto derivative = [&](const std::vector<Elem>& v, std::vector<Elem>& out) {
-        out = v;
-        fft.IFFT(out, m, field, sel);
-        for (size_t i = 0; i < n; i += 2) {
-            out[i] = out[i + 1];
-            out[i + 1] = 0;
-        }
-        fft.FFT(out, m, field, sel);
-    };
-    // v := v / Z_A mod f (degree < N, and < d if deg v < N), values on A in
-    // and out, where v holds a square (zero derivative) of degree < 2N, or,
-    // with general set, any polynomial of degree < N.
-    std::vector<Elem> dv;
-    auto reduce = [&](std::vector<Elem>& v, bool general) {
-        if (general) derivative(v, dv);
-        for (size_t j = 0; j < n; ++j) v[j] = field.Mul(v[j], inv_fa[j]);
-        derivative(v, q);
-        for (size_t j = 0; j < n; ++j) v[j] = field.Mul(q[j], fa[j]) ^ field.Mul(v[j], dfa[j]);
-        if (general) {
-            for (size_t j = 0; j < n; ++j) v[j] ^= dv[j];
-        }
-    };
 
     std::vector<Wide> wide(8 * n, field.WideZero());
     Elem bcoef = basis;
@@ -1345,13 +1490,13 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
         Wide* w = wide.data() + (i % 8) * n;
         for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(bcoef, ra[j]));
         bcoef = field.Sqr(bcoef);
-        for (size_t j = 0; j < n; ++j) ra[j] = field.Sqr(ra[j]);
-        reduce(ra, false);
+        mc->Square(ra);
     }
     // X_Bits == x iff the Montgomery forms agree mod f, i.e. iff the
-    // reduction of their difference vanishes (on A, hence identically).
+    // reduction of their difference vanishes (on the coset, hence
+    // identically, as its degree is < d).
     for (size_t j = 0; j < n; ++j) ra[j] ^= ra0[j];
-    reduce(ra, true);
+    mc->Reduce(ra, false);
     for (size_t j = 0; j < n; ++j) {
         if (ra[j] != 0) return 0;
     }
@@ -1359,12 +1504,14 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
     acc.assign(8, std::vector<Elem>());
     for (int r = 0; r < 8; ++r) {
         for (size_t j = 0; j < n; ++j) ra[j] = field.Reduce(wide[r * n + j]);
-        reduce(ra, true);
-        fft.IFFT(ra, m, field, sel);
-#ifdef MINISKETCH_VERIFY
-        for (size_t j = d; j < n; ++j) CHECK_SAFE(ra[j] == 0);
-#endif
-        acc[r].assign(ra.begin(), ra.begin() + d);
+        if (r == 0 && carry) {
+            carry->m = m;
+            carry->block = mc->block;
+            carry->v = ra;
+            carry->ga = mc->Values();
+        }
+        mc->ToNormal(ra, d, acc[r]);
+        acc[r].resize(d, 0);
     }
     return 1;
 }
@@ -1427,12 +1574,13 @@ void CombineTowerTraces(const std::vector<std::vector<typename F::Elem>>& acc, s
  * the field: the return value. This decides factorizability exactly at the
  * root, replacing the deferred trace^2 + trace test. */
 template<typename F>
-bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, size_t depths, const F& field, std::vector<std::vector<typename F::Elem>>& traces, std::vector<typename F::Elem>& betas) {
+bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, size_t depths, const F& field, std::vector<std::vector<typename F::Elem>>& traces, std::vector<typename F::Elem>& betas, MontTree<F>* tree = nullptr, MontCarry<F>* carry = nullptr) {
     typedef typename F::Elem Elem;
     typedef typename F::Wide Wide;
     const size_t d = poly.size() - 1;
     const int bits = field.Bits();
     CHECK_SAFE(d >= 3 && poly.back() == 1);
+    if (carry) carry->tree = nullptr;
     traces.assign(depths, std::vector<Elem>(d, 0));
     betas.resize(bits);
     const bool tower = (bits % 8) == 0 && depths <= 8;
@@ -1461,9 +1609,14 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
     }
     std::vector<std::vector<Elem>> acc;
     if (tower && d >= MONT_ORBIT_MIN_DEGREE && TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) {
-        int res = MontgomeryOrbit(poly, basis, field, acc);
+        AdditiveFFT<F> local_fft;
+        int res = MontgomeryOrbit(poly, basis, field, acc, tree ? tree->fft : local_fft, tree ? carry : nullptr);
         if (res == 0) return false;
         if (res == 1) {
+            if (tree && carry) {
+                tree->z = z;
+                carry->tree = tree;
+            }
             CombineTowerTraces(acc, depths, z, field, traces);
             return true;
         }
@@ -1586,7 +1739,7 @@ void SmallTrace(const std::vector<typename F::Elem>& poly, typename F::Elem para
  * case the polynomial cannot be fully factored.
  */
 template<typename F>
-bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos, std::vector<typename F::Elem>& roots, bool fully_factorizable, int depth, typename F::Elem randv, const F& field, const std::vector<std::vector<typename F::Elem>>* orbit = nullptr, size_t orbit_degree = 0, const std::vector<typename F::Elem>* betas = nullptr) {
+bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos, std::vector<typename F::Elem>& roots, bool fully_factorizable, int depth, typename F::Elem randv, const F& field, const std::vector<std::vector<typename F::Elem>>* orbit = nullptr, size_t orbit_degree = 0, const std::vector<typename F::Elem>* betas = nullptr, const MontCarry<F>* carry = nullptr) {
     auto& ppoly = stack[pos];
     // We assert ppoly.size() > 1 (instead of just ppoly.size() > 0) to additionally exclude
     // constants polynomials because
@@ -1635,7 +1788,19 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             // Compute the polynomial (trace(x*randv) mod poly(x)) symbolically,
             // and put the result in `trace`.
             MINISKETCH_COZ_BEGIN("findroots-trace");
-            if (orbit && size_t(depth) < orbit->size() && ORBIT_NODE_FACTOR * orbit_degree <= (poly.size() - 1) * field.Bits()) {
+            bool have_trace = false;
+            const bool at_root = orbit && size_t(depth) < orbit->size() && poly.size() - 1 == orbit_degree;
+            if (carry && carry->tree && !at_root && depth < 8 && poly.size() - 1 > SMALL_TRACE_MAX) {
+                // T = Tr_(GF(2^Bits)/GF(2^8))(basis * x) mod poly is carried
+                // down the tree in Montgomery form; the depth's split
+                // parameter is basis * z^depth (tower scheme).
+                typename F::Elem zk = 1;
+                for (int k = 0; k < depth; ++k) zk = field.Mul(zk, carry->tree->z);
+                have_trace = MontNodeTrace(*carry, poly, zk, trace, field);
+                CHECK_SAFE(have_trace);
+            }
+            if (have_trace) {
+            } else if (orbit && size_t(depth) < orbit->size() && ORBIT_NODE_FACTOR * orbit_degree <= (poly.size() - 1) * field.Bits()) {
                 // randv is the orbit's split parameter for this depth, so the
                 // trace mod the root polynomial reduces to the one mod poly
                 // (a factor of it): one division instead of Bits-1 modular
@@ -1734,13 +1899,19 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
     // find roots of trace and tmp (= poly/trace). As we don't care about poly anymore, move
     // trace into its position first.
     std::swap(poly, trace);
+    // Carry T to both factors while their split parameters are in the tower.
+    MontCarry<F> carry_poly, carry_tmp;
+    if (carry && carry->tree && depth < 8) {
+        if (poly.size() - 1 > SMALL_TRACE_MAX) MontCarryToFactor(*carry, poly, carry_poly, field);
+        if (tmp.size() - 1 > SMALL_TRACE_MAX) MontCarryToFactor(*carry, tmp, carry_tmp, field);
+    }
     // Now the stack is [... (trace) tmp ...]. First we factor tmp (at pos = pos+1), and then
     // we factor trace (at pos = pos).
-    if (!RecFindRoots(stack, pos + 1, roots, fully_factorizable, depth, randv, field, orbit, orbit_degree, betas)) return false;
+    if (!RecFindRoots(stack, pos + 1, roots, fully_factorizable, depth, randv, field, orbit, orbit_degree, betas, &carry_tmp)) return false;
     // The stack position pos contains trace, the polynomial with all of poly's roots which (after
     // multiplication with randv) have trace 0. This is never the case for irreducible factors
     // (which always end up in tmp), so we can set fully_factorizable to true when recursing.
-    bool ret = RecFindRoots(stack, pos, roots, true, depth, randv, field, orbit, orbit_degree, betas);
+    bool ret = RecFindRoots(stack, pos, roots, true, depth, randv, field, orbit, orbit_degree, betas, &carry_poly);
     // Because of the above, recursion can never fail here.
     CHECK_SAFE(ret);
     return ret;
@@ -1773,10 +1944,12 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
         std::vector<std::vector<typename F::Elem>> traces;
         std::vector<typename F::Elem> betas;
         MINISKETCH_COZ_BEGIN("findroots-orbit");
-        bool split = ComputeTraceOrbit(poly, basis, depths, field, traces, betas);
+        MontTree<F> tree;
+        MontCarry<F> carry;
+        bool split = ComputeTraceOrbit(poly, basis, depths, field, traces, betas, &tree, &carry);
         MINISKETCH_COZ_END("findroots-orbit");
         if (!split) return {};
-        if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, poly.size() - 1, &betas)) return {};
+        if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, poly.size() - 1, &betas, &carry)) return {};
         CHECK_RETURN(poly.size() - 1 == roots.size(), {});
         return roots;
     }

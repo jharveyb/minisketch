@@ -212,6 +212,114 @@ public:
         }
     }
 
+    /* Novel-basis transforms (Lin, Chung and Han, "Novel polynomial basis
+     * and its application to Reed-Solomon erasure codes", FOCS 2014). In
+     * the Cantor basis the normalized subspace polynomials are S^j(x)
+     * (S(x) = x^2 + x, S^j(beta_j) = 1), and the novel basis is
+     * X_k(x) = prod_(j in bits(k)) S^j(x). FFT above is ToNovel (the XOR
+     * cascades: repeated division by S^(p-1)) fused with NovelFFT (the
+     * butterflies), so FFT(f) == NovelFFT(ToNovel(f)). For a pipeline that
+     * stays in the value domain, such as the coset Montgomery arithmetic of
+     * the root finder, only NovelFFT/NovelIFFT run per operation: no
+     * cascades, and the butterflies of a round are independent. The formal
+     * derivative is cheap in this basis: S^j' = 1, so
+     * X_k' = sum_(j in bits(k)) X_(k - 2^j). */
+
+    /** Monomial to novel-basis coefficients, in place (size 2^m). */
+    void ToNovel(std::vector<Elem>& f, int m) const {
+        CHECK_SAFE(m >= 1 && m <= max_t && f.size() == (size_t(1) << m));
+        for (int r = 0; r < m; ++r) {
+            int p = m - r;
+            size_t h = size_t(1) << (p - 1);
+            const std::vector<size_t>& zs = zeta[p - 1];
+            if (zs.empty()) continue;
+            for (size_t off = 0; off < f.size(); off += 2 * h) {
+                for (size_t k = off + 2 * h; k-- > off + h; ) {
+                    Elem c = f[k];
+                    if (c == 0) continue;
+                    for (size_t z : zs) f[k - z] ^= c;
+                }
+            }
+        }
+    }
+
+    /** Exact inverse of ToNovel. */
+    void FromNovel(std::vector<Elem>& f, int m) const {
+        CHECK_SAFE(m >= 1 && m <= max_t && f.size() == (size_t(1) << m));
+        for (int r = m - 1; r >= 0; --r) {
+            int p = m - r;
+            size_t h = size_t(1) << (p - 1);
+            const std::vector<size_t>& zs = zeta[p - 1];
+            if (zs.empty()) continue;
+            for (size_t off = 0; off < f.size(); off += 2 * h) {
+                for (size_t k = off + h; k < off + 2 * h; ++k) {
+                    Elem c = f[k];
+                    if (c == 0) continue;
+                    for (size_t z : zs) f[k - z] ^= c;
+                }
+            }
+        }
+    }
+
+    /** Novel-basis coefficients to values on coset `block` of W_m (same
+     *  points and order as FFT), in place. */
+    void NovelFFT(std::vector<Elem>& f, int m, const F& field, size_t block = 0) const {
+        CHECK_SAFE(m >= 1 && m <= max_t && f.size() == (size_t(1) << m));
+        CHECK_SAFE(((block + 1) << m) <= (size_t(1) << max_t));
+        for (int r = 0; r < m; ++r) {
+            const size_t h = size_t(1) << (m - r - 1);
+            for (size_t i = 0; i < (size_t(1) << r); ++i) {
+                Elem* lo = f.data() + 2 * h * i;
+                Elem* hi = lo + h;
+                const Elem tw = twiddle[i + (block << r)];
+                if (tw == 0) {
+                    for (size_t k = 0; k < h; ++k) hi[k] ^= lo[k];
+                } else {
+                    for (size_t k = 0; k < h; ++k) {
+                        lo[k] ^= field.Mul(tw, hi[k]);
+                        hi[k] ^= lo[k];
+                    }
+                }
+            }
+        }
+    }
+
+    /** Exact inverse of NovelFFT. */
+    void NovelIFFT(std::vector<Elem>& f, int m, const F& field, size_t block = 0) const {
+        CHECK_SAFE(m >= 1 && m <= max_t && f.size() == (size_t(1) << m));
+        CHECK_SAFE(((block + 1) << m) <= (size_t(1) << max_t));
+        for (int r = m - 1; r >= 0; --r) {
+            const size_t h = size_t(1) << (m - r - 1);
+            for (size_t i = 0; i < (size_t(1) << r); ++i) {
+                Elem* lo = f.data() + 2 * h * i;
+                Elem* hi = lo + h;
+                const Elem tw = twiddle[i + (block << r)];
+                if (tw == 0) {
+                    for (size_t k = 0; k < h; ++k) hi[k] ^= lo[k];
+                } else {
+                    for (size_t k = 0; k < h; ++k) {
+                        hi[k] ^= lo[k];
+                        lo[k] ^= field.Mul(tw, hi[k]);
+                    }
+                }
+            }
+        }
+    }
+
+    /** out = the novel-basis coefficients of the formal derivative of the
+     *  polynomial with novel-basis coefficients f (size 2^m):
+     *  out_i = sum over bits j clear in i of f_(i + 2^j). */
+    static void NovelDerivative(const std::vector<Elem>& f, int m, std::vector<Elem>& out) {
+        const size_t n = size_t(1) << m;
+        out.assign(n, 0);
+        for (int j = 0; j < m; ++j) {
+            const size_t s = size_t(1) << j;
+            for (size_t base = 0; base < n; base += 2 * s) {
+                for (size_t i = base; i < base + s; ++i) out[i] ^= f[i + s];
+            }
+        }
+    }
+
     /** out = a*b with trailing zeros stripped. out must not alias a or b. */
     void MulFull(const std::vector<Elem>& a, const std::vector<Elem>& b, std::vector<Elem>& out, const F& field) {
         if (a.empty() || b.empty()) {

@@ -567,6 +567,46 @@ void TestAdditiveFFT(const F& field, TestRand& rng, size_t iters) {
         }
     }
 
+    // Coset transforms: FFT on block b evaluates at eta_(b*2^m + j) (Horner
+    // oracle); the novel-basis path (ToNovel, then NovelFFT) gives the same
+    // values; every inverse is exact; NovelDerivative matches the formal
+    // derivative of the monomial form.
+    for (int m = 1; m + 2 <= std::min(max_t, 8); ++m) {
+        size_t n_points = size_t(1) << m;
+        for (size_t block = 0; block < 4; ++block) {
+            std::vector<Elem> f(n_points);
+            for (auto& e : f) e = RandElem(rng, field);
+            auto eval = f;
+            fft.FFT(eval, m, field, block);
+            for (size_t j = 0; j < n_points; ++j) {
+                Elem x = 0;
+                for (int b = 0; b < max_t; ++b) {
+                    if (((block * n_points + j) >> b) & 1) x ^= beta[b];
+                }
+                Elem horner = 0;
+                for (size_t i = f.size(); i > 0; --i) horner = field.Mul(horner, x) ^ f[i - 1];
+                UT_REQUIRE(eval[j] == horner);
+            }
+            auto back = eval;
+            fft.IFFT(back, m, field, block);
+            UT_REQUIRE(back == f);
+            auto nov = f;
+            fft.ToNovel(nov, m);
+            auto nov_coef = nov;
+            fft.NovelFFT(nov, m, field, block);
+            UT_REQUIRE(nov == eval);
+            fft.NovelIFFT(nov, m, field, block);
+            UT_REQUIRE(nov == nov_coef);
+            fft.FromNovel(nov, m);
+            UT_REQUIRE(nov == f);
+            std::vector<Elem> deriv(n_points, 0), nov_deriv;
+            for (size_t i = 1; i < n_points; i += 2) deriv[i - 1] = f[i];
+            fft.ToNovel(deriv, m);
+            AdditiveFFT<F>::NovelDerivative(nov_coef, m, nov_deriv);
+            UT_REQUIRE(nov_deriv == deriv);
+        }
+    }
+
     // MulFull/MulLow against the schoolbook oracle, one engine across mixed
     // sizes (exercises Extend growth and buffer reuse). Boundary product
     // lengths around powers of two and around the cutoff, then random sizes.
