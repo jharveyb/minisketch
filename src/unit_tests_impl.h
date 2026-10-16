@@ -758,9 +758,13 @@ void TestBerlekampMasseyVsRef(const F& field, TestRand& rng, size_t iters, size_
     // recurrence with the squared connection polynomial past the prefix,
     // and a perturbed tail syndrome is rejected - for lengths on both sides
     // of the FFT threshold.
-    for (size_t count : {size_t(3), size_t(17), size_t(40), size_t(100), size_t(BM_VERIFY_FFT_MIN_DEGREE + 5)}) {
+    // Tails span several blocks of each tier: the Karatsuba tier's blocks
+    // are ~L+1 positions (interior blocks read u in place), the FFT tier's
+    // up to ~3L.
+    const size_t fft_min = F::LAZY_REDUCE ? BM_VERIFY_FFT_MIN_DEGREE : BM_VERIFY_FFT_MIN_DEGREE_TABLE;
+    for (size_t count : {size_t(3), size_t(17), size_t(40), size_t(BM_VERIFY_KARA_MIN_DEGREE + 6), size_t(100), fft_min + 5}) {
         if (count + 2 >= field_size) continue;
-        size_t cap = count + 40 + rng.RandRange(40);
+        size_t cap = count + 40 + rng.RandRange(40) + (count >= BM_VERIFY_KARA_MIN_DEGREE ? 4 * count : 0) + (count >= fft_min ? 4 * count : 0);
         auto roots = RandDistinctElems(rng, field, count);
         std::vector<Elem> osyn(cap, 0);
         for (auto e : roots) AddToOddSyndromes(osyn, e, field);
