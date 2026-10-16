@@ -103,6 +103,12 @@
 #ifndef MINISKETCH_MONT_TOWER_BITS
 #define MINISKETCH_MONT_TOWER_BITS 4
 #endif
+/* Levels beyond log2 of the root's coset size for which the Montgomery
+ * tree carries relative traces (MontgomeryOrbit); deeper nodes compute
+ * their own. */
+#ifndef MINISKETCH_CARRY_DEPTH_MARGIN
+#define MINISKETCH_CARRY_DEPTH_MARGIN 2
+#endif
 #ifndef MINISKETCH_SMALL_CARRY_MAX
 #define MINISKETCH_SMALL_CARRY_MAX 16
 #endif
@@ -1662,9 +1668,9 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
     // Accumulators of trace0 = sum_i basis^(2^i) X_i and of the relative
     // traces T_l = sum_(i = 0 mod s) (basis * xi^l)^(2^i) X_i.
     // Only the traces for the depths a degree-d tree reaches with nodes of
-    // degree >= 3 (about log2(d) + 3; deeper nodes, if any, compute their
+    // degree >= 3 (about log2(d) + 2; deeper nodes, if any, compute their
     // own traces).
-    const int n_traces = std::min<int>(CARRY_TRACES, (m + 3 + MONT_TOWER_BITS - 1) / MONT_TOWER_BITS);
+    const int n_traces = std::min<int>(CARRY_TRACES, (m + MINISKETCH_CARRY_DEPTH_MARGIN + MONT_TOWER_BITS - 1) / MONT_TOWER_BITS);
     std::vector<Wide> wide_all(n, field.WideZero()), wide_t(n_traces * n, field.WideZero());
     Elem bcoef = basis, tcoef[CARRY_TRACES];
     tcoef[0] = basis;
