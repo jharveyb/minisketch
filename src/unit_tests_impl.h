@@ -753,6 +753,18 @@ void TestBerlekampMasseyVsRef(const F& field, TestRand& rng, size_t iters, size_
         auto want = BerlekampMasseyRef(syndromes, max_degree, field);
         UT_REQUIRE(got == want);
     }
+    // A few LFSR lengths at and above the FFT verification threshold (the
+    // random counts above stay below it), with and without a perturbation.
+    if (field_size - 1 < BM_VERIFY_FFT_MIN_DEGREE + 8) return;
+    for (int i = 0; i < 4; ++i) {
+        size_t count = BM_VERIFY_FFT_MIN_DEGREE + rng.RandRange(8);
+        size_t cap = count + BM_VERIFY_MIN_TAIL + rng.RandRange(64);
+        std::vector<Elem> osyn(cap, 0);
+        for (auto e : RandDistinctElems(rng, field, count)) AddToOddSyndromes(osyn, e, field);
+        if (i & 1) osyn[count + rng.RandRange(cap - count)] ^= RandNonzeroElem(rng, field);
+        auto syndromes = ReconstructAllSyndromes(osyn, field);
+        UT_REQUIRE(BerlekampMassey(syndromes, cap, field) == BerlekampMasseyRef(syndromes, cap, field));
+    }
 }
 
 /** FindRoots on degrees that take the Frobenius-orbit path: square-free

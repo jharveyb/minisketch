@@ -56,10 +56,13 @@
 #define MINISKETCH_BM_VERIFY_MIN_PREFIX 0
 #endif
 /* Minimum LFSR length for the additive-FFT tail verification, for fields
- * with a cheap scalar Multiplier (CLMUL) and with a table-based one
- * (generic, whose pointwise FFT products are slow one-off multiplications). */
+ * with a cheap, lazily-reducing scalar multiplication (CLMUL; below it, a
+ * direct check with one carry-less product per term is faster, measured on
+ * Zen 3, Haswell and Cortex-A76) and for table-based ones (generic, whose
+ * pointwise FFT products are slow one-off multiplications; below it, a
+ * Karatsuba/naive product check). */
 #ifndef MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE
-#define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE 24
+#define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE 192
 #endif
 #ifndef MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE
 #define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE_TABLE 40
@@ -1387,12 +1390,38 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
  * operands, computed with the additive FFT (transforms of the two conn
  * halves are prepared once and the two products are summed in the
  * evaluation domain, one inverse transform per block) or with the
- * Karatsuba/naive tiers. Stops at the first block containing a violation. */
+ * Karatsuba/naive tiers. Lazily-reducing fields check moderate lengths
+ * directly instead. Stops at the first block containing a violation. */
 template<typename F>
 bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const std::vector<typename F::Elem>& syndromes, size_t start, const F& field) {
     typedef typename F::Elem Elem;
     const size_t L = conn.size() - 1;
     CHECK_SAFE(start >= L + 2);
+    if (F::LAZY_REDUCE && L < BM_VERIFY_FFT_MIN_DEGREE) {
+        // Direct check: one unreduced product per term, four positions at a
+        // time so every coefficient load feeds four accumulators.
+        typedef typename F::Wide Wide;
+        const size_t N = syndromes.size();
+        size_t n = start + (start & 1);
+        for (; n + 6 < N; n += 8) {
+            Wide a0 = field.WideFrom(syndromes[n]), a1 = field.WideFrom(syndromes[n + 2]);
+            Wide a2 = field.WideFrom(syndromes[n + 4]), a3 = field.WideFrom(syndromes[n + 6]);
+            for (size_t i = 1; i <= L; ++i) {
+                Elem c = conn[i];
+                a0 = field.WideXor(a0, field.MulWide(c, syndromes[n - i]));
+                a1 = field.WideXor(a1, field.MulWide(c, syndromes[n + 2 - i]));
+                a2 = field.WideXor(a2, field.MulWide(c, syndromes[n + 4 - i]));
+                a3 = field.WideXor(a3, field.MulWide(c, syndromes[n + 6 - i]));
+            }
+            if (field.Reduce(a0) | field.Reduce(a1) | field.Reduce(a2) | field.Reduce(a3)) return false;
+        }
+        for (; n < N; n += 2) {
+            Wide a = field.WideFrom(syndromes[n]);
+            for (size_t i = 1; i <= L; ++i) a = field.WideXor(a, field.MulWide(conn[i], syndromes[n - i]));
+            if (field.Reduce(a)) return false;
+        }
+        return true;
+    }
     std::vector<Elem> conn_e, conn_o;
     for (size_t i = 0; i <= L; ++i) (i & 1 ? conn_o : conn_e).push_back(conn[i]);
     while (!conn_o.empty() && conn_o.back() == 0) conn_o.pop_back();
@@ -1497,8 +1526,10 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
  *    (by induction over j, as verification starts past 2L). So the full
  *    iteration would see zero discrepancies throughout the tail and return
  *    the same polynomial. This replaces the O(c*L) tail of serial
- *    discrepancy computations by O(c log L) (FFT tier) work, which matters
- *    when the number of differences is far below the capacity. */
+ *    discrepancy computations by O(c log L) (FFT tier) work - or, for
+ *    moderate L on lazily-reducing fields, by an independent-position
+ *    direct check at one carry-less product per term - which matters when
+ *    the number of differences is far below the capacity. */
 template<typename F>
 std::vector<typename F::Elem> BerlekampMassey(const std::vector<typename F::Elem>& syndromes, size_t max_degree, const F& field) {
     std::vector<typename F::Multiplier> table;
