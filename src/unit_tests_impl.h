@@ -755,6 +755,37 @@ void TestBerlekampMasseyVsRef(const F& field, TestRand& rng, size_t iters, size_
     }
 }
 
+/** FindRoots on degrees that take the Frobenius-orbit path: square-free
+ *  split polynomials must yield their roots; a non-split factor or a
+ *  repeated root must make it fail. */
+template<typename F>
+void TestFindRootsOrbit(const F& field, uint64_t lowmod, TestRand& rng, size_t iters, size_t maxroots) {
+    typedef typename F::Elem Elem;
+    const int bits = field.Bits();
+    const uint64_t field_size = bits >= 20 ? (uint64_t{1} << 20) : (uint64_t{1} << bits);
+    if (field_size - 1 < ORBIT_MIN_DEGREE + 2) return;
+    for (size_t i = 0; i < iters; ++i) {
+        size_t count = ORBIT_MIN_DEGREE + rng.RandRange(std::min<uint64_t>(maxroots, field_size - 2 - ORBIT_MIN_DEGREE));
+        auto roots = RandDistinctElems(rng, field, count);
+        auto poly = PolyFromRootsRef(roots, field);
+        std::sort(roots.begin(), roots.end());
+        Elem basis = RandNonzeroElem(rng, field);
+        auto found = FindRoots(poly, basis, field);
+        std::sort(found.begin(), found.end());
+        UT_REQUIRE(found == roots);
+
+        Elem c;
+        do {
+            c = RandNonzeroElem(rng, field);
+        } while (RefTrace(c, bits, lowmod) != 1);
+        std::vector<Elem> quad{c, 1, 1};
+        UT_REQUIRE(FindRoots(PolyMulRef(poly, quad, field), basis, field).empty());
+
+        std::vector<Elem> dup{roots[rng.RandRange(roots.size())], 1};
+        UT_REQUIRE(FindRoots(PolyMulRef(poly, dup, field), basis, field).empty());
+    }
+}
+
 template<typename F>
 void TestFindRoots(const F& field, uint64_t lowmod, TestRand& rng, size_t iters, size_t maxroots) {
     typedef typename F::Elem Elem;
@@ -834,6 +865,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestBerlekampMassey(field, rng, 128, 10);
     TestBerlekampMasseyVsRef(field, rng, 200, 160);
     TestFindRoots(field, lowmod, rng, 64, 8);
+    TestFindRootsOrbit(field, lowmod, rng, 16, 64);
     TestDecodeStagesLarge(field, rng, 256);
 }
 
