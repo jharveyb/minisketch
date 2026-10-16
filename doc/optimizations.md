@@ -12,11 +12,14 @@ stage.
 Decoding a sketch of capacity `c` containing `n` differences over
 GF(2<sup>m</sup>) runs three stages (`src/sketch_impl.h`):
 
-1. **Syndrome reconstruction** — O(c) squarings.
+1. **Syndrome reconstruction** — the even syndromes s<sub>2k</sub> =
+   s<sub>k</sub>², one squaring each. Since 2026-10 only for the
+   Berlekamp-Massey prefix (~2n), not all 2c.
 2. **Berlekamp-Massey** — O(n²) for the LFSR itself (only the odd steps;
    see "Frobenius-structured Berlekamp-Massey" below) plus an
    independent-position check of the remaining O(c) recurrence constraints
-   once the LFSR has converged: O(c·n) single carry-less products, or
+   once the LFSR has converged: O(c·n) single carry-less products for
+   small n, O(c·n<sup>0.585</sup>) with lazy Karatsuba middle products,
    O(c log n) with the additive FFT for large n. Before 2026-10 this stage
    was a serial O(c·n) loop over all 2c syndromes, which dominated decode
    whenever n ≪ c.
@@ -492,8 +495,9 @@ per block per transform. That halved generic BM time on a Pi 5.
 
 ### One Frobenius orbit for the whole root-finding tree
 
-All nodes at depth k split with the same β<sub>k</sub> = basis·2<sup>k</sup>,
-and every node g divides the root polynomial f, so
+All nodes at depth k split with the same parameter β<sub>k</sub>
+(basis·2<sup>k</sup>, or the tower basis below), and every node g divides
+the root polynomial f, so
 Tr(β<sub>k</sub>x) mod g = (Tr(β<sub>k</sub>x) mod f) mod g.
 `ComputeTraceOrbit` generates X<sub>i</sub> = x<sup>2<sup>i</sup></sup> mod f
 once (m−1 modular squarings, the cost of one trace) and accumulates
@@ -600,9 +604,9 @@ exact root-level factorizability test. On the i7, capacity 1024 with 1100
 differences went 28.4 → 12.6 ms, and capacity 4096 with 4200 went
 192 → 76 ms.
 
-Stage split at 1024/256 on the i7 afterwards: the root chain is ~50%,
-node divisions ~14%, inversions ~6%, orbit accumulation and reducer
-construction ~5% each, BM ~6%.
+Stage split at 1024/256 on the i7 afterwards: the root orbit (chain,
+accumulation, exact test) ~57%, node divisions and small-node traces
+~24%, Euclid ~9%, BM ~7%. At 8192/128 BM (the tail check) is ~39%.
 
 Per-commit gains for the later commits, against the preceding commit on
 i7-4770 / Pi 5:
