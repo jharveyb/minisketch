@@ -225,10 +225,12 @@ Specific algorithms and optimizations used:
   * Repeated multiplications are accelerated using runtime precomputations on systems where multiplications are relatively slow.
   * The serialization of field elements always represents them as bits that are coefficients of the lowest-weight (using lexicographic order as tie breaker) irreducible polynomials over *GF(2)* (see [this list](doc/moduli.md)), but for some implementations they are converted to a different representation internally.
 * The sketch algorithms are specialized for each separate field implementation, permitting inlining and specific optimizations while avoiding dynamic allocations and branching costs.
-* Decoding of sketches uses the [Berlekamp-Massey algorithm](https://en.wikipedia.org/w/index.php?title=Berlekamp%E2%80%93Massey_algorithm&oldid=870768940)<sup>[[3]](#myfootnote3)</sup> to compute the characteristic polynomial.
+* Decoding of sketches uses the [Berlekamp-Massey algorithm](https://en.wikipedia.org/w/index.php?title=Berlekamp%E2%80%93Massey_algorithm&oldid=870768940)<sup>[[3]](#myfootnote3)</sup> to compute the characteristic polynomial. It skips the steps whose discrepancy is known to be zero (the binary-BCH simplification), and stops as soon as the polynomial has converged, after one exact check of the remaining sketch elements against the squared recurrence. Decoding cost therefore tracks the number of differences much more than the capacity.
 * Finding the roots of polynomials is done using the Berlekamp trace algorithm with explicit formula for quadratic polynomials<sup>[[4]](#myfootnote4)</sup>. The root finding is randomized to prevent adversarial inputs that intentionally trigger worst-case decode time.
 * A (possibly) novel optimization combines a test for unique roots with the Berlekamp trace algorithm.
 * Two different precomputation approaches for efficient reduction mod a polynomial in the BTA computation of the trace.
+* The Frobenius orbit needed for the trace is computed once, for the whole polynomial, and shared by the top levels of the root-finding recursion (with split parameters chosen from a subfield tower basis so the shared traces are cheap to combine).
+* On CLMUL/PMULL hardware, sums of products are accumulated unreduced and reduced once (lazy reduction), in the trace, Berlekamp-Massey, division and GCD loops.
 
 See [doc/optimizations.md](doc/optimizations.md) for the decode cost model, notes on
 the optimizations above, and analysis of the deferred ideas below.
@@ -237,10 +239,9 @@ Some improvements that are still TODO:
 * Explicit formulas for the roots of polynomials of higher degree than 2 (a
   Berlekamp-Rumsey-Solomon attempt measured slower than the reducer-based trace at
   every field size; see doc/optimizations.md)
-* Subquadratic multiplication and modulus algorithms beyond the trace stage (the
-  trace reduction already uses Karatsuba and a Newton reciprocal series; GCD,
-  division and Berlekamp-Massey remain quadratic)
-* The [Half-GCD algorithm](http://mathworld.wolfram.com/Half-GCD.html) for faster GCDs
+* Making the subquadratic tiers (additive FFT, Newton division, [Half-GCD](http://mathworld.wolfram.com/Half-GCD.html))
+  pay off at smaller degrees: against the lazily-reducing schoolbook loops they
+  currently only win at degrees in the high hundreds to thousands
 * An interface for incremental decoding: most of the computation in most failed decodes can be reused when attempting to decode a longer sketch of the same set
 * Platform specific optimizations for platforms other than x86
 * Avoid using slow uint64_t for calculations on 32-bit hosts
