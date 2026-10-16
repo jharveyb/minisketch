@@ -924,6 +924,88 @@ void TestFindRootsOrbit(const F& field, uint64_t lowmod, TestRand& rng, size_t i
     }
 }
 
+/** FindRoots on degrees that take the coset Montgomery path (root degree
+ *  >= MONT_ORBIT_MIN_DEGREE on FFT-capable fields with a cheap Multiplier):
+ *  degree exactly a power of two (deg f == N), roots planted on the
+ *  candidate cosets (forcing the later candidates, then the fallback when
+ *  all four are hit), a degree deep enough for the second relative trace
+ *  and the normal-form carry, and the failure cases. */
+template<typename F>
+void TestFindRootsMontgomery(const F& field, uint64_t lowmod, TestRand& rng) {
+    typedef typename F::Elem Elem;
+    const int bits = field.Bits();
+    if (!TraceModFFTCapable(field) || !TraceModCheapScalarMul<F>() || bits % 8 != 0) return;
+    AdditiveFFT<F> fft;
+    fft.Extend(field, std::min(bits, 13));
+    const auto& beta = fft.Basis();
+    // A point of coset `block` of W_m: eta_(block * 2^m + j).
+    auto coset_point = [&](int m, size_t block) {
+        size_t idx = block * (size_t(1) << m) + rng.RandRange(uint64_t(1) << m);
+        Elem x = 0;
+        for (int k = 0; (idx >> k) != 0; ++k) {
+            if ((idx >> k) & 1) x ^= beta[k];
+        }
+        return x;
+    };
+    struct Case { size_t degree; int planted; };
+    for (Case c : {Case{MONT_ORBIT_MIN_DEGREE, 0}, Case{MONT_ORBIT_MIN_DEGREE + 44, 0}, Case{MONT_ORBIT_MIN_DEGREE + 44, 3}, Case{MONT_ORBIT_MIN_DEGREE + 44, 4}, Case{MONT_ORBIT_MIN_DEGREE, 4}, Case{1100, 0}}) {
+        if (c.degree + 2 > (size_t(1) << std::min(bits, 20))) continue;
+        int m = 1;
+        while ((size_t(1) << m) < c.degree) ++m;
+        if (m + 2 > bits) continue;
+        std::vector<Elem> roots;
+        // Planted roots on the candidate cosets (blocks 1, 2, 3, then 0).
+        for (int k = 0; k < c.planted; ++k) {
+            Elem x;
+            do {
+                x = coset_point(m, (k + 1) % 4);
+            } while (x == 0 || std::find(roots.begin(), roots.end(), x) != roots.end());
+            roots.push_back(x);
+        }
+        for (auto x : RandDistinctElems(rng, field, c.degree)) {
+            if (roots.size() == c.degree) break;
+            if (std::find(roots.begin(), roots.end(), x) == roots.end()) roots.push_back(x);
+        }
+        UT_REQUIRE(roots.size() == c.degree);
+        auto poly = PolyFromRootsRef(roots, field);
+        std::sort(roots.begin(), roots.end());
+        Elem basis = RandNonzeroElem(rng, field);
+        auto found = FindRoots(poly, basis, field);
+        std::sort(found.begin(), found.end());
+        UT_REQUIRE(found == roots);
+
+        if (c.degree > 300) continue;
+        // ComputeTraceOrbit without a tree: every trace from the orbit's
+        // carry must be Tr(beta_k x) mod poly.
+        std::vector<std::vector<Elem>> traces;
+        std::vector<Elem> betas;
+        UT_REQUIRE(ComputeTraceOrbit(poly, basis, 8, field, traces, betas));
+        UT_REQUIRE(traces.size() == 8);
+        for (size_t k = 0; k < traces.size(); ++k) {
+            for (size_t r = 0; r < 16; ++r) {
+                Elem root = roots[rng.RandRange(roots.size())];
+                Elem val = 0, pw = 1;
+                for (auto co : traces[k]) {
+                    val ^= field.Mul(co, pw);
+                    pw = field.Mul(pw, root);
+                }
+                UT_REQUIRE(val == Elem(RefTrace(uint64_t(field.Mul(betas[k], root)), bits, lowmod)));
+            }
+        }
+
+        // Not fully factorizable: an irreducible quadratic factor, or a
+        // repeated root.
+        Elem q;
+        do {
+            q = RandNonzeroElem(rng, field);
+        } while (RefTrace(q, bits, lowmod) != 1);
+        std::vector<Elem> quad{q, 1, 1};
+        UT_REQUIRE(FindRoots(PolyMulRef(poly, quad, field), basis, field).empty());
+        std::vector<Elem> dup{roots[rng.RandRange(roots.size())], 1};
+        UT_REQUIRE(FindRoots(PolyMulRef(poly, dup, field), basis, field).empty());
+    }
+}
+
 template<typename F>
 void TestFindRoots(const F& field, uint64_t lowmod, TestRand& rng, size_t iters, size_t maxroots) {
     typedef typename F::Elem Elem;
@@ -1005,6 +1087,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestBerlekampMasseyExhaustive(field);
     TestFindRoots(field, lowmod, rng, 64, 8);
     TestFindRootsOrbit(field, lowmod, rng, 16, 64);
+    TestFindRootsMontgomery(field, lowmod, rng);
     TestDecodeStagesLarge(field, rng, 256);
 }
 

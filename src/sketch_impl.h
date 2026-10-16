@@ -95,6 +95,11 @@
 #ifndef MINISKETCH_MONT_ORBIT_MIN_DEGREE
 #define MINISKETCH_MONT_ORBIT_MIN_DEGREE 256
 #endif
+/* Node degree up to which the root-finding tree carries the relative
+ * traces in normal form instead of Montgomery form (MontCarry). */
+#ifndef MINISKETCH_SMALL_CARRY_MAX
+#define MINISKETCH_SMALL_CARRY_MAX 16
+#endif
 /* Lazy Karatsuba middle-product tail check (lazily-reducing fields): used
  * for LFSR lengths in [KARA_MIN_DEGREE, FFT_MIN_DEGREE), below which the
  * direct check wins (from ~32 on Haswell, ~96 on Cortex-A76); direct
@@ -130,6 +135,7 @@ static const size_t ORBIT_MIN_DEGREE = MINISKETCH_ORBIT_MIN_DEGREE;
 static const size_t ORBIT_EXTRA_DEPTHS = MINISKETCH_ORBIT_EXTRA_DEPTHS;
 static const size_t ORBIT_NODE_FACTOR = MINISKETCH_ORBIT_NODE_FACTOR;
 static const size_t MONT_ORBIT_MIN_DEGREE = MINISKETCH_MONT_ORBIT_MIN_DEGREE;
+static const size_t SMALL_CARRY_MAX = MINISKETCH_SMALL_CARRY_MAX;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -1372,31 +1378,48 @@ struct MontTree {
     typename F::Elem z;
 };
 
-/** The relative trace T = Tr_(GF(2^Bits)/GF(2^8))(basis * x) modulo a node
- * polynomial of the root-finding tree, in Montgomery form on a coset (see
- * above). The split trace of tower depth k < 8 at the node is
- * Tr(basis * z^k * x) = Tr_(GF(2^8)/GF(2))(z^k * T) = sum_(r<8) (z^k T)^(2^r),
- * seven modular squarings. */
+/** Number of relative traces carried down the root-finding tree. */
+static const int CARRY_TRACES = 2;
+
+/** The relative traces T_l = Tr_(GF(2^Bits)/GF(2^8))(basis * xi^l * x)
+ * (xi = Mul2's generator, l < CARRY_TRACES) modulo a node polynomial g of
+ * the root-finding tree. With the tower split parameters
+ * beta_(8l+k) = basis * xi^l * z^k, the split trace of depth 8l + k at the
+ * node is Tr(beta_(8l+k) * x) = Tr_(GF(2^8)/GF(2))(z^k * T_l) =
+ * sum_(r<8) (z^k T_l)^(2^r) mod g: seven modular squarings. Large nodes
+ * hold the T_l in Montgomery form on a coset (see above); nodes of degree
+ * at most SMALL_CARRY_MAX hold them in normal form (coefficients), carried
+ * to factors by plain division. T_l is empty once no descendant needs
+ * it. */
 template<typename F>
 struct MontCarry {
     const MontTree<F>* tree = nullptr;
+    bool normal = false;
     int m = 0;
     size_t block = 0;
-    std::vector<typename F::Elem> v;  //!< T's Montgomery form on the coset
-    std::vector<typename F::Elem> ga; //!< the node polynomial on the coset, if computed
+    std::vector<typename F::Elem> t[CARRY_TRACES]; //!< Montgomery values on the coset, or coefficients if normal
+    std::vector<typename F::Elem> ga;              //!< the node polynomial on the coset, if computed
 };
 
-/** Carry the parent's T to its factor g (monic, 3 <= deg g < parent's
- * degree): halve the coset while deg g fits in the half. */
+/** Carry the Montgomery-form traces of a parent node to its factor g
+ * (monic, 3 <= deg g < parent's degree) for the traces l >= l_min: halve
+ * the coset while deg g fits in the half. */
 template<typename F>
-void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F::Elem>& g, MontCarry<F>& child, const F& field) {
+void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F::Elem>& g, int l_min, MontCarry<F>& child, const F& field) {
     typedef typename F::Elem Elem;
     const AdditiveFFT<F>& fft = parent.tree->fft;
     const size_t d = g.size() - 1;
     child.tree = parent.tree;
+    child.normal = false;
     child.m = parent.m;
     child.block = parent.block;
-    child.v = parent.v;
+    for (int l = 0; l < CARRY_TRACES; ++l) {
+        if (l >= l_min) {
+            child.t[l] = parent.t[l];
+        } else {
+            child.t[l].clear();
+        }
+    }
     child.ga.clear();
     std::vector<Elem> g0, inv_g0, q;
     while (child.m > 1 && d <= (size_t(1) << (child.m - 1))) {
@@ -1409,48 +1432,79 @@ void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F:
         bool ok = BatchInvert(g0, inv_g0, field);
         CHECK_SAFE(ok);
         (void)ok;
-        q.resize(h);
-        for (size_t j = 0; j < h; ++j) q[j] = field.Mul(child.v[j], inv_g0[j]);
-        fft.NovelIFFT(q, mh, field, b0);
-        fft.NovelFFT(q, mh, field, b1);
-        for (size_t j = 0; j < h; ++j) q[j] = child.v[h + j] ^ field.Mul(q[j], child.ga[j]);
-        child.v.swap(q);
+        for (int l = l_min; l < CARRY_TRACES; ++l) {
+            auto& v = child.t[l];
+            q.resize(h);
+            for (size_t j = 0; j < h; ++j) q[j] = field.Mul(v[j], inv_g0[j]);
+            fft.NovelIFFT(q, mh, field, b0);
+            fft.NovelFFT(q, mh, field, b1);
+            for (size_t j = 0; j < h; ++j) q[j] = v[h + j] ^ field.Mul(q[j], child.ga[j]);
+            v.swap(q);
+        }
         child.m = mh;
         child.block = b1;
     }
 }
 
-/** out = Tr(basis * z^k * x) mod g in normal form, from g's carry. */
+/** out = sum_(r<8) (zk * t)^(2^r) mod g for t of degree < deg g, all in
+ * coefficient form (for small g). */
 template<typename F>
-bool MontNodeTrace(const MontCarry<F>& carry, const std::vector<typename F::Elem>& g, typename F::Elem zk, std::vector<typename F::Elem>& out, const F& field) {
+void TowerTraceSmall(const std::vector<typename F::Elem>& g, const std::vector<typename F::Elem>& t, typename F::Elem zk, std::vector<typename F::Elem>& out, const F& field) {
     typedef typename F::Elem Elem;
-    MontCoset<F> mc(carry.tree->fft, field, carry.m, carry.block);
-    if (!mc.SetModulus(g, carry.ga.empty() ? nullptr : &carry.ga)) return false;
+    const size_t n = g.size() - 1;
+    std::vector<Elem> y(n, 0), sq(2 * n - 1);
+    for (size_t j = 0; j < t.size(); ++j) y[j] = field.Mul(zk, t[j]);
+    out = y;
+    for (int r = 1; r < 8; ++r) {
+        for (size_t j = 0; j < n; ++j) {
+            sq[2 * j] = field.Sqr(y[j]);
+            if (j + 1 < n) sq[2 * j + 1] = 0;
+        }
+        for (size_t e = 2 * n - 2; e >= n; --e) {
+            const Elem c = sq[e];
+            if (c == 0) continue;
+            typename F::Multiplier mul(field, c);
+            for (size_t k = 0; k < n; ++k) sq[e - n + k] ^= mul(g[k]);
+        }
+        for (size_t j = 0; j < n; ++j) {
+            y[j] = sq[j];
+            out[j] ^= y[j];
+        }
+    }
+    PolyStrip(out);
+}
+
+/** out = sum_(r<8) (zk * T)^(2^r) mod g from T's Montgomery values v on
+ * mc's coset (mc's modulus g). */
+template<typename F>
+void MontTowerTrace(MontCoset<F>& mc, const std::vector<typename F::Elem>& v, size_t deg_g, typename F::Elem zk, std::vector<typename F::Elem>& out, const F& field) {
+    typedef typename F::Elem Elem;
     std::vector<Elem> y(mc.n), acc(mc.n);
-    for (size_t j = 0; j < mc.n; ++j) acc[j] = y[j] = field.Mul(zk, carry.v[j]);
+    for (size_t j = 0; j < mc.n; ++j) acc[j] = y[j] = field.Mul(zk, v[j]);
     for (int r = 1; r < 8; ++r) {
         mc.Square(y);
         for (size_t j = 0; j < mc.n; ++j) acc[j] ^= y[j];
     }
-    mc.ToNormal(acc, g.size() - 1, out);
-    return true;
+    mc.ToNormal(acc, deg_g, out);
 }
 
 /** Frobenius orbit sums by Montgomery reduction on a coset (see above).
  *
- * As in ComputeTraceOrbit's tower scheme, with X_i = x^(2^i) mod f,
- * acc[r] = sum_(i = r mod 8) basis^(2^i) * X_i is accumulated (on the
- * coset, in Montgomery form) while x is squared Bits times, and returned
- * in normal form. X_Bits == x (full factorizability) is tested by reducing
- * the difference of the Montgomery forms. If carry is given, it receives
- * acc[0] = T in Montgomery form (with tree->fft as the transform engine,
- * which this function extends).
+ * With X_i = x^(2^i) mod f, accumulates (on the coset, in Montgomery form)
+ * while x is squared Bits times the root's split trace
+ * trace0 = Tr(basis * x) = sum_i basis^(2^i) * X_i, returned in normal
+ * form, and the relative traces T_l = sum_(i = 0 mod 8) (basis * xi^l)^(2^i)
+ * * X_i (see MontCarry), returned in carry (whose tree is left to the caller)
+ * with fft as its transform engine, which this function extends. Deeper
+ * split traces come from the T_l (MontTowerTrace). X_Bits == x (full
+ * factorizability) is tested by reducing the difference of the Montgomery
+ * forms.
  *
  * Requires f to have no root on the coset; the four cosets of W_m in
  * W_(m+2) are tried in turn. Returns 1 (factorizable, acc filled), 0 (not
  * factorizable), or -1 when not applicable (caller falls back). */
 template<typename F>
-int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, const F& field, std::vector<std::vector<typename F::Elem>>& acc, AdditiveFFT<F>& fft, MontCarry<F>* carry) {
+int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, const F& field, std::vector<typename F::Elem>& trace0, AdditiveFFT<F>& fft, MontCarry<F>& carry) {
     typedef typename F::Elem Elem;
     typedef typename F::Wide Wide;
     const size_t d = poly.size() - 1;
@@ -1484,12 +1538,23 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
     }
     const std::vector<Elem> ra0 = ra;
 
-    std::vector<Wide> wide(8 * n, field.WideZero());
-    Elem bcoef = basis;
+    // Accumulators of trace0 = sum_i basis^(2^i) X_i and of the relative
+    // traces T_l = sum_(i = 0 mod 8) (basis * xi^l)^(2^i) X_i.
+    std::vector<Wide> wide_all(n, field.WideZero()), wide_t(CARRY_TRACES * n, field.WideZero());
+    Elem bcoef = basis, tcoef[CARRY_TRACES];
+    tcoef[0] = basis;
+    for (int l = 1; l < CARRY_TRACES; ++l) tcoef[l] = field.Mul2(tcoef[l - 1]);
     for (int i = 0; i < bits; ++i) {
-        Wide* w = wide.data() + (i % 8) * n;
+        Wide* w = wide_all.data();
         for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(bcoef, ra[j]));
+        if (i % 8 == 0) {
+            for (int l = 0; l < CARRY_TRACES; ++l) {
+                w = wide_t.data() + l * n;
+                for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(tcoef[l], ra[j]));
+            }
+        }
         bcoef = field.Sqr(bcoef);
+        for (int l = 0; l < CARRY_TRACES; ++l) tcoef[l] = field.Sqr(tcoef[l]);
         mc->Square(ra);
     }
     // X_Bits == x iff the Montgomery forms agree mod f, i.e. iff the
@@ -1501,18 +1566,16 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
         if (ra[j] != 0) return 0;
     }
 
-    acc.assign(8, std::vector<Elem>());
-    for (int r = 0; r < 8; ++r) {
-        for (size_t j = 0; j < n; ++j) ra[j] = field.Reduce(wide[r * n + j]);
-        if (r == 0 && carry) {
-            carry->m = m;
-            carry->block = mc->block;
-            carry->v = ra;
-            carry->ga = mc->Values();
-        }
-        mc->ToNormal(ra, d, acc[r]);
-        acc[r].resize(d, 0);
+    carry.normal = false;
+    carry.m = m;
+    carry.block = mc->block;
+    for (int l = 0; l < CARRY_TRACES; ++l) {
+        carry.t[l].resize(n);
+        for (size_t j = 0; j < n; ++j) carry.t[l][j] = field.Reduce(wide_t[l * n + j]);
     }
+    carry.ga = mc->Values();
+    for (size_t j = 0; j < n; ++j) ra[j] = field.Reduce(wide_all[j]);
+    mc->ToNormal(ra, d, trace0);
     return 1;
 }
 
@@ -1609,15 +1672,29 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
     }
     std::vector<std::vector<Elem>> acc;
     if (tower && d >= MONT_ORBIT_MIN_DEGREE && TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) {
-        AdditiveFFT<F> local_fft;
-        int res = MontgomeryOrbit(poly, basis, field, acc, tree ? tree->fft : local_fft, tree ? carry : nullptr);
+        MontTree<F> local_tree;
+        MontCarry<F> local_carry;
+        MontTree<F>& mtree = (tree && carry) ? *tree : local_tree;
+        MontCarry<F>& mcarry = (tree && carry) ? *carry : local_carry;
+        int res = MontgomeryOrbit(poly, basis, field, traces[0], mtree.fft, mcarry);
         if (res == 0) return false;
         if (res == 1) {
+            mtree.z = z;
+            mcarry.tree = &mtree;
             if (tree && carry) {
-                tree->z = z;
-                carry->tree = tree;
+                // The root-finding tree computes deeper traces from the carry.
+                traces.resize(1);
+            } else {
+                MontCoset<F> mc(mtree.fft, field, mcarry.m, mcarry.block);
+                bool ok = mc.SetModulus(poly, &mcarry.ga);
+                CHECK_SAFE(ok);
+                (void)ok;
+                Elem zk = 1;
+                for (size_t k = 1; k < depths; ++k) {
+                    zk = field.Mul(zk, z);
+                    MontTowerTrace(mc, mcarry.t[0], d, zk, traces[k], field);
+                }
             }
-            CombineTowerTraces(acc, depths, z, field, traces);
             return true;
         }
     }
@@ -1775,6 +1852,19 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
     auto& trace = stack[pos + 2];
     trace.clear();
     tmp.clear();
+    // The node modulus on the carry's coset, if the carry is in Montgomery
+    // form and the node needs it.
+    std::unique_ptr<MontCoset<F>> node_mc;
+    auto get_node_mc = [&]() -> MontCoset<F>& {
+        if (!node_mc) {
+            node_mc.reset(new MontCoset<F>(carry->tree->fft, field, carry->m, carry->block));
+            bool ok = node_mc->SetModulus(poly, carry->ga.empty() ? nullptr : &carry->ga);
+            CHECK_SAFE(ok);
+            (void)ok;
+        }
+        return *node_mc;
+    };
+    const size_t node_degree = poly.size() - 1;
     // Limit TraceMod lifetime to free precomputed table after trace loop.
     {
         // Built only when a trace is not available from the orbit.
@@ -1790,14 +1880,18 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             MINISKETCH_COZ_BEGIN("findroots-trace");
             bool have_trace = false;
             const bool at_root = orbit && size_t(depth) < orbit->size() && poly.size() - 1 == orbit_degree;
-            if (carry && carry->tree && !at_root && depth < 8 && poly.size() - 1 > SMALL_TRACE_MAX) {
-                // T = Tr_(GF(2^Bits)/GF(2^8))(basis * x) mod poly is carried
-                // down the tree in Montgomery form; the depth's split
-                // parameter is basis * z^depth (tower scheme).
+            if (carry && carry->tree && !at_root && depth < 8 * CARRY_TRACES && !carry->t[depth / 8].empty()) {
+                // The relative trace T_l (l = depth / 8) mod poly is carried
+                // down the tree; the depth's split parameter is
+                // basis * xi^l * z^(depth % 8) (tower scheme).
                 typename F::Elem zk = 1;
-                for (int k = 0; k < depth; ++k) zk = field.Mul(zk, carry->tree->z);
-                have_trace = MontNodeTrace(*carry, poly, zk, trace, field);
-                CHECK_SAFE(have_trace);
+                for (int k = 0; k < depth % 8; ++k) zk = field.Mul(zk, carry->tree->z);
+                if (carry->normal) {
+                    TowerTraceSmall(poly, carry->t[depth / 8], zk, trace, field);
+                } else {
+                    MontTowerTrace(get_node_mc(), carry->t[depth / 8], poly.size() - 1, zk, trace, field);
+                }
+                have_trace = true;
             }
             if (have_trace) {
             } else if (orbit && size_t(depth) < orbit->size() && ORBIT_NODE_FACTOR * orbit_degree <= (poly.size() - 1) * field.Bits()) {
@@ -1899,11 +1993,41 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
     // find roots of trace and tmp (= poly/trace). As we don't care about poly anymore, move
     // trace into its position first.
     std::swap(poly, trace);
-    // Carry T to both factors while their split parameters are in the tower.
+    // Carry the relative traces still needed to both factors.
     MontCarry<F> carry_poly, carry_tmp;
-    if (carry && carry->tree && depth < 8) {
-        if (poly.size() - 1 > SMALL_TRACE_MAX) MontCarryToFactor(*carry, poly, carry_poly, field);
-        if (tmp.size() - 1 > SMALL_TRACE_MAX) MontCarryToFactor(*carry, tmp, carry_tmp, field);
+    if (carry && carry->tree && depth < 8 * CARRY_TRACES) {
+        const int l_min = depth / 8;
+        std::vector<typename F::Elem> node_t[CARRY_TRACES];
+        bool have_node_t = carry->normal;
+        auto to_factor = [&](const std::vector<typename F::Elem>& g, MontCarry<F>& out) {
+            if (g.size() - 1 < 3) return;
+            if (!carry->normal && g.size() - 1 > SMALL_CARRY_MAX) {
+                MontCarryToFactor(*carry, g, l_min, out, field);
+                return;
+            }
+            if (!have_node_t) {
+                // The node's traces in normal form, once.
+                for (int l = l_min; l < CARRY_TRACES; ++l) {
+                    if (carry->t[l].empty()) continue;
+                    std::vector<typename F::Elem> v = carry->t[l];
+                    get_node_mc().ToNormal(v, node_degree, node_t[l]);
+                }
+                have_node_t = true;
+            }
+            out.tree = carry->tree;
+            out.normal = true;
+            for (int l = 0; l < CARRY_TRACES; ++l) {
+                out.t[l].clear();
+                if (l < l_min || carry->t[l].empty()) continue;
+                out.t[l] = carry->normal ? carry->t[l] : node_t[l];
+                PolyMod(g, out.t[l], field);
+                // An all-zero residue is a valid trace input; keep a marker
+                // coefficient so that "empty" keeps meaning "not carried".
+                if (out.t[l].empty()) out.t[l].assign(1, 0);
+            }
+        };
+        to_factor(poly, carry_poly);
+        to_factor(tmp, carry_tmp);
     }
     // Now the stack is [... (trace) tmp ...]. First we factor tmp (at pos = pos+1), and then
     // we factor trace (at pos = pos).
