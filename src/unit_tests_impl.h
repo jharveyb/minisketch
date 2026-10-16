@@ -1029,6 +1029,78 @@ void TestFindRootsMontgomery(const F& field, uint64_t lowmod, TestRand& rng) {
     }
 }
 
+/** FindRoots with every root in the kernel of the first 12 split
+ *  functionals alpha -> Tr(beta_k alpha) of the Montgomery tree's tower:
+ *  the splits of depths 0..11 all fail (every root on one side), which runs
+ *  the carry and the power-sum split through their no-split paths and the
+ *  tree past the carried traces into its own-trace fallback. */
+template<typename F>
+void TestFindRootsDeepTree(const F& field, uint64_t lowmod, TestRand& rng) {
+    typedef typename F::Elem Elem;
+    const int bits = field.Bits();
+    if (!TraceModFFTCapable(field) || !TraceModCheapScalarMul<F>() || bits % MONT_TOWER_BITS != 0 || bits < 32) return;
+    const size_t degree = 300, nfun = 12;
+    const Elem basis = RandNonzeroElem(rng, field);
+    // The tower split parameters (see ComputeTraceOrbit).
+    std::vector<Elem> betas;
+    const Elem z = SubfieldGenerator(field, MONT_TOWER_BITS);
+    for (Elem xl = basis; betas.size() < nfun; xl = field.Mul2(xl)) {
+        Elem v = xl;
+        for (int k = 0; k < MONT_TOWER_BITS && betas.size() < nfun; ++k, v = field.Mul(v, z)) betas.push_back(v);
+    }
+    // Kernel of alpha -> (Tr(beta_k alpha))_k over the bit basis, by
+    // elimination on [functional values | identity].
+    std::vector<std::pair<uint64_t, uint64_t>> rows; // (values, combination)
+    for (int b = 0; b < bits; ++b) {
+        uint64_t val = 0;
+        for (size_t k = 0; k < nfun; ++k) val |= RefTrace(uint64_t(field.Mul(betas[k], Elem(uint64_t{1} << b))), bits, lowmod) << k;
+        rows.emplace_back(val, uint64_t{1} << b);
+    }
+    for (size_t k = 0, r = 0; k < nfun; ++k) {
+        size_t p = r;
+        while (p < rows.size() && !((rows[p].first >> k) & 1)) ++p;
+        if (p == rows.size()) continue;
+        std::swap(rows[p], rows[r]);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (i != r && ((rows[i].first >> k) & 1)) {
+                rows[i].first ^= rows[r].first;
+                rows[i].second ^= rows[r].second;
+            }
+        }
+        ++r;
+    }
+    std::vector<uint64_t> kernel;
+    for (const auto& row : rows) {
+        if (row.first == 0) kernel.push_back(row.second);
+    }
+    UT_REQUIRE(kernel.size() == size_t(bits) - nfun);
+    std::vector<Elem> roots;
+    while (roots.size() < degree) {
+        uint64_t a = 0;
+        for (auto kv : kernel) {
+            if (rng.RandRange(2)) a ^= kv;
+        }
+        Elem e = Elem(a);
+        if (e == 0 || std::find(roots.begin(), roots.end(), e) != roots.end()) continue;
+        roots.push_back(e);
+    }
+    auto poly = PolyFromRootsRef(roots, field);
+    std::sort(roots.begin(), roots.end());
+    std::vector<Elem> osyn(degree + 8, 0);
+    for (auto r : roots) {
+        Elem r2 = field.Sqr(r), pw = r;
+        for (auto& o : osyn) {
+            o ^= pw;
+            pw = field.Mul(pw, r2);
+        }
+    }
+    for (bool with_sums : {false, true}) {
+        auto found = FindRoots(poly, basis, field, with_sums ? &osyn : nullptr);
+        std::sort(found.begin(), found.end());
+        UT_REQUIRE(found == roots);
+    }
+}
+
 template<typename F>
 void TestFindRoots(const F& field, uint64_t lowmod, TestRand& rng, size_t iters, size_t maxroots) {
     typedef typename F::Elem Elem;
@@ -1111,6 +1183,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestFindRoots(field, lowmod, rng, 64, 8);
     TestFindRootsOrbit(field, lowmod, rng, 16, 64);
     TestFindRootsMontgomery(field, lowmod, rng);
+    TestFindRootsDeepTree(field, lowmod, rng);
     TestDecodeStagesLarge(field, rng, 256);
 }
 

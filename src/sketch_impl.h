@@ -1544,6 +1544,7 @@ void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F:
         (void)ok;
         for (int l = l_min; l < CARRY_TRACES; ++l) {
             auto& v = child.t[l];
+            if (v.empty()) continue;
             q.resize(h);
             for (size_t j = 0; j < h; ++j) q[j] = field.Mul(v[j], inv_g0[j]);
             fft.NovelIFFT(q, mh, field, b0);
@@ -1660,7 +1661,11 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
 
     // Accumulators of trace0 = sum_i basis^(2^i) X_i and of the relative
     // traces T_l = sum_(i = 0 mod s) (basis * xi^l)^(2^i) X_i.
-    std::vector<Wide> wide_all(n, field.WideZero()), wide_t(CARRY_TRACES * n, field.WideZero());
+    // Only the traces for the depths a degree-d tree reaches with nodes of
+    // degree >= 3 (about log2(d) + 3; deeper nodes, if any, compute their
+    // own traces).
+    const int n_traces = std::min<int>(CARRY_TRACES, (m + 3 + MONT_TOWER_BITS - 1) / MONT_TOWER_BITS);
+    std::vector<Wide> wide_all(n, field.WideZero()), wide_t(n_traces * n, field.WideZero());
     Elem bcoef = basis, tcoef[CARRY_TRACES];
     tcoef[0] = basis;
     for (int l = 1; l < CARRY_TRACES; ++l) tcoef[l] = field.Mul2(tcoef[l - 1]);
@@ -1668,7 +1673,7 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
         Wide* w = wide_all.data();
         for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(bcoef, ra[j]));
         if (i % MONT_TOWER_BITS == 0) {
-            for (int l = 0; l < CARRY_TRACES; ++l) {
+            for (int l = 0; l < n_traces; ++l) {
                 w = wide_t.data() + l * n;
                 for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(tcoef[l], ra[j]));
             }
@@ -1690,6 +1695,8 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
     carry.m = m;
     carry.block = mc->block;
     for (int l = 0; l < CARRY_TRACES; ++l) {
+        carry.t[l].clear();
+        if (l >= n_traces) continue;
         carry.t[l].resize(n);
         for (size_t j = 0; j < n; ++j) carry.t[l][j] = field.Reduce(wide_t[l * n + j]);
     }
