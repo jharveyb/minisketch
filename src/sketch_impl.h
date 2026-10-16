@@ -880,6 +880,9 @@ class TraceMod {
 
     size_t d, first_even;
     std::vector<Elem> rows;
+    // Lazy-reduction layout of rows (see the constructor).
+    size_t num_rows = 0;
+    std::vector<Elem> blk, tail;
 
     std::vector<Elem> rev_mod, inv;
 
@@ -894,7 +897,6 @@ class TraceMod {
     // for the Karatsuba multiplications, hoisted here so the trace loop is
     // allocation-free in steady state.
     std::vector<Elem> sqr_tmp;
-    std::vector<const Elem*> sqr_rows;
     std::vector<Elem> sqr_coeffs;
     std::vector<Elem> rev_val, q_rev, quot, prod;
     TraceModScratch<F> scratch;
@@ -927,6 +929,23 @@ public:
                         for (size_t j = 0; j < d; ++j) rem[j] ^= mul(mod[j]);
                     }
                 }
+            }
+            if (F::LAZY_REDUCE) {
+                // Column-block-major copy for the lazy reducer, which walks
+                // all rows per block of 8 output columns: contiguous instead
+                // of one cache line per row 8*d bytes apart. The d % 8 tail
+                // columns stay in a small row-major array.
+                num_rows = rows.size() / d;
+                size_t nb = d / 8, tl = d % 8;
+                blk.resize(nb * num_rows * 8);
+                tail.resize(num_rows * tl);
+                for (size_t r = 0; r < num_rows; ++r) {
+                    const Elem* row = rows.data() + r * d;
+                    for (size_t b = 0; b < nb; ++b) std::copy(row + 8 * b, row + 8 * b + 8, blk.begin() + (b * num_rows + r) * 8);
+                    std::copy(row + 8 * nb, row + d, tail.begin() + r * tl);
+                }
+                rows.clear();
+                rows.shrink_to_fit();
             }
         } else {
             size_t m = mod.size();
@@ -961,10 +980,11 @@ private:
         if (F::LAZY_REDUCE) {
             // Accumulate the row contributions unreduced (one reduction per
             // output coefficient instead of one per row entry), in column
-            // blocks of 8 whose accumulators stay in registers; every row is
-            // still read once per call.
-            sqr_rows.clear();
-            sqr_coeffs.clear();
+            // blocks of 8 whose accumulators stay in registers; the table
+            // (column-block-major) is streamed once per call.
+            typedef typename F::Wide Wide;
+            sqr_coeffs.assign(num_rows, 0);
+            size_t used = 0;
             for (size_t i = 0; i < val.size(); ++i) {
                 if (val[i] == 0) continue;
                 Elem coeff = field.Sqr(val[i]);
@@ -972,46 +992,42 @@ private:
                 if (e < d) {
                     sqr_tmp[e] ^= coeff;
                 } else {
-                    const Elem* row = Row(e);
-                    if (coeff == 1) {
-                        for (size_t j = 0; j < d; ++j) sqr_tmp[j] ^= row[j];
-                    } else {
-                        sqr_rows.push_back(row);
-                        sqr_coeffs.push_back(coeff);
-                    }
+                    size_t r = (e - first_even) / 2;
+                    sqr_coeffs[r] = coeff;
+                    used = r + 1;
                 }
             }
-            const size_t nrows = sqr_rows.size();
-            if (nrows) {
-                typedef typename F::Wide Wide;
-                size_t j = 0;
-                for (; j + 8 <= d; j += 8) {
+            if (used) {
+                const Elem* c = sqr_coeffs.data();
+                const size_t nb = d / 8, tl = d % 8;
+                for (size_t b = 0; b < nb; ++b) {
+                    const Elem* p = blk.data() + b * num_rows * 8;
                     Wide a0 = field.WideZero(), a1 = a0, a2 = a0, a3 = a0, a4 = a0, a5 = a0, a6 = a0, a7 = a0;
-                    for (size_t r = 0; r < nrows; ++r) {
-                        const Elem* row = sqr_rows[r] + j;
-                        Elem c = sqr_coeffs[r];
-                        a0 = field.WideXor(a0, field.MulWide(c, row[0]));
-                        a1 = field.WideXor(a1, field.MulWide(c, row[1]));
-                        a2 = field.WideXor(a2, field.MulWide(c, row[2]));
-                        a3 = field.WideXor(a3, field.MulWide(c, row[3]));
-                        a4 = field.WideXor(a4, field.MulWide(c, row[4]));
-                        a5 = field.WideXor(a5, field.MulWide(c, row[5]));
-                        a6 = field.WideXor(a6, field.MulWide(c, row[6]));
-                        a7 = field.WideXor(a7, field.MulWide(c, row[7]));
+                    for (size_t r = 0; r < used; ++r, p += 8) {
+                        Elem cr = c[r];
+                        a0 = field.WideXor(a0, field.MulWide(cr, p[0]));
+                        a1 = field.WideXor(a1, field.MulWide(cr, p[1]));
+                        a2 = field.WideXor(a2, field.MulWide(cr, p[2]));
+                        a3 = field.WideXor(a3, field.MulWide(cr, p[3]));
+                        a4 = field.WideXor(a4, field.MulWide(cr, p[4]));
+                        a5 = field.WideXor(a5, field.MulWide(cr, p[5]));
+                        a6 = field.WideXor(a6, field.MulWide(cr, p[6]));
+                        a7 = field.WideXor(a7, field.MulWide(cr, p[7]));
                     }
-                    sqr_tmp[j] ^= field.Reduce(a0);
-                    sqr_tmp[j + 1] ^= field.Reduce(a1);
-                    sqr_tmp[j + 2] ^= field.Reduce(a2);
-                    sqr_tmp[j + 3] ^= field.Reduce(a3);
-                    sqr_tmp[j + 4] ^= field.Reduce(a4);
-                    sqr_tmp[j + 5] ^= field.Reduce(a5);
-                    sqr_tmp[j + 6] ^= field.Reduce(a6);
-                    sqr_tmp[j + 7] ^= field.Reduce(a7);
+                    Elem* out = sqr_tmp.data() + 8 * b;
+                    out[0] ^= field.Reduce(a0);
+                    out[1] ^= field.Reduce(a1);
+                    out[2] ^= field.Reduce(a2);
+                    out[3] ^= field.Reduce(a3);
+                    out[4] ^= field.Reduce(a4);
+                    out[5] ^= field.Reduce(a5);
+                    out[6] ^= field.Reduce(a6);
+                    out[7] ^= field.Reduce(a7);
                 }
-                for (; j < d; ++j) {
+                for (size_t t = 0; t < tl; ++t) {
                     Wide a = field.WideZero();
-                    for (size_t r = 0; r < nrows; ++r) a = field.WideXor(a, field.MulWide(sqr_coeffs[r], sqr_rows[r][j]));
-                    sqr_tmp[j] ^= field.Reduce(a);
+                    for (size_t r = 0; r < used; ++r) a = field.WideXor(a, field.MulWide(c[r], tail[r * tl + t]));
+                    sqr_tmp[8 * nb + t] ^= field.Reduce(a);
                 }
             }
             val.swap(sqr_tmp);
