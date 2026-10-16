@@ -113,6 +113,11 @@
 #ifndef MINISKETCH_COSET_DIV_MIN
 #define MINISKETCH_COSET_DIV_MIN 64
 #endif
+/* Node degree from which Montgomery-form nodes split by power sums
+ * (PowerSumSplit) instead of a gcd when the power sums are known. */
+#ifndef MINISKETCH_PSUM_SPLIT_MIN
+#define MINISKETCH_PSUM_SPLIT_MIN 128
+#endif
 #ifndef MINISKETCH_MONT_NORMALIZE_MIN
 #define MINISKETCH_MONT_NORMALIZE_MIN 512
 #endif
@@ -154,6 +159,7 @@ static const size_t MONT_ORBIT_MIN_DEGREE = MINISKETCH_MONT_ORBIT_MIN_DEGREE;
 static const size_t SMALL_CARRY_MAX = MINISKETCH_SMALL_CARRY_MAX;
 static const size_t MONT_NORMALIZE_MIN = MINISKETCH_MONT_NORMALIZE_MIN;
 static const size_t COSET_DIV_MIN = MINISKETCH_COSET_DIV_MIN;
+static const size_t PSUM_SPLIT_MIN = MINISKETCH_PSUM_SPLIT_MIN;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -1933,6 +1939,114 @@ void SmallTrace(const std::vector<typename F::Elem>& poly, typename F::Elem para
     PolyStrip(out);
 }
 
+template<typename F>
+std::vector<typename F::Elem> BerlekampMasseyOdd(const std::vector<typename F::Elem>& osyn, size_t n_syn, size_t max_degree, const F& field);
+template<typename F>
+void LazyMiddleProduct(const typename F::Elem* c, const typename F::Elem* w, size_t n, typename F::Wide* out, typename F::Elem* es, typename F::Wide* wsc, const F& field);
+
+/** q = g / h on mc's coset (gv: g's values there, deg_g = deg g), for monic
+ * h: hv receives h's values, qv q's. Returns false unless h divides g: the
+ * interpolated quotient must be monic of degree deg_g - deg h, which with
+ * deg_g <= 2^m forces q * h = g. */
+template<typename F>
+bool CosetDivide(const AdditiveFFT<F>& fft, MontCoset<F>& mc, const std::vector<typename F::Elem>& gv, size_t deg_g, const std::vector<typename F::Elem>& h, std::vector<typename F::Elem>& hv, std::vector<typename F::Elem>& q, std::vector<typename F::Elem>& qv, const F& field) {
+    typedef typename F::Elem Elem;
+    const size_t deg_h = h.size() - 1;
+    if (deg_h > deg_g) return false;
+    MontCoset<F>::Eval(fft, field, mc.m, mc.block, h, hv);
+    std::vector<Elem> inv;
+    if (!BatchInvert(hv, inv, field)) return false;
+    qv.resize(mc.n);
+    for (size_t j = 0; j < mc.n; ++j) qv[j] = field.Mul(gv[j], inv[j]);
+    std::vector<Elem> v = qv;
+    mc.ToCoefficients(v, q);
+    return q.size() == deg_g - deg_h + 1 && q.back() == 1;
+}
+
+/** Split a Montgomery-form node g (monic, degree n, on mc's coset with
+ * values gv) by its split trace t (normal form: t = 0 or 1 at every root)
+ * using the power sums q[k-1] = Q_k = sum over roots of alpha^k (k <=
+ * q.size()) instead of a gcd.
+ *
+ * The roots A with t = 1 have the power sums
+ *     P_k = sum_(alpha in A) alpha^k = sum_alpha t(alpha) alpha^k
+ *         = sum_(j<n) t_j Q_(j+k),
+ * a Hankel product, and t(alpha)^2 = t(alpha) gives P_(2k) = P_k^2: the
+ * syndrome structure, so BerlekampMasseyOdd recovers prod_(A) (1 - alpha y)
+ * from the odd P_k alone, at the cost of an |A|-root decode - against a
+ * Euclidean gcd running from degree n down to n - |A|. With 2M >= n power
+ * sums one of A and its complement B (power sums Q_k - P_k) has at most n/2
+ * roots and is recovered; the other side follows by division on the coset,
+ * whose exactness check also rejects a BM result from too few terms.
+ *
+ * Returns 1 with g0/g1 (the factors with t = 0 and t = 1), their coset
+ * values v0/v1 and power sums q0/q1 (2M terms each); 0 if all roots lie on
+ * one side; -1 if neither side was recovered (the caller uses the gcd). */
+template<typename F>
+int PowerSumSplit(const AdditiveFFT<F>& fft, MontCoset<F>& mc, const std::vector<typename F::Elem>& g, const std::vector<typename F::Elem>& gv, const std::vector<typename F::Elem>& t, const std::vector<typename F::Elem>& q, std::vector<typename F::Elem>& g0, std::vector<typename F::Elem>& g1, std::vector<typename F::Elem>& v0, std::vector<typename F::Elem>& v1, std::vector<typename F::Elem>& q0, std::vector<typename F::Elem>& q1, const F& field) {
+    typedef typename F::Elem Elem;
+    typedef typename F::Wide Wide;
+    const size_t n = g.size() - 1;
+    if (q.size() + 1 < 2 * n) return -1;
+    // 2M power sums of each side: enough for the smaller side (2M >= n),
+    // and for the children's own splits (which need twice their degree)
+    // unless the split is unbalanced by more than ~4 standard deviations.
+    size_t sq = 1;
+    while (sq * sq < n) ++sq;
+    size_t two_m = std::min(q.size() + 1 - n, n + 4 * sq + 32) & ~size_t(1);
+    if (two_m < n) return -1;
+    const size_t m_odd = two_m / 2;
+    // Odd P_k, k = 2i + 1: sum_j t_j Q_(j+2i+1). Split j by parity:
+    //     P_(2i+1) = sum_a t_(2a) Q_(2(a+i)+1) + sum_a t_(2a+1) Q_(2(a+i)+2),
+    // two middle products of half length against the odd and the even
+    // power sums, by transposed Karatsuba in blocks of h outputs; outputs
+    // past the last full block as direct dot products.
+    size_t h = (n + 1) / 2;
+    h += h & 1;
+    const size_t nb = m_odd / h, wlen = (nb + 1) * h + h;
+    std::vector<Elem> ce(h, 0), co(h, 0), we(wlen, 0), wo(wlen, 0), es(4 * h);
+    for (size_t j = 0; j < t.size(); ++j) ((j & 1) ? co : ce)[j / 2] = t[j];
+    for (size_t s = 0; s < wlen && 2 * s < q.size(); ++s) we[s] = q[2 * s];
+    for (size_t s = 0; s < wlen && 2 * s + 1 < q.size(); ++s) wo[s] = q[2 * s + 1];
+    std::vector<Wide> oute(h), outo(h), wsc(2 * h);
+    std::vector<Elem> p_odd(m_odd);
+    for (size_t b = 0; b < nb; ++b) {
+        LazyMiddleProduct(ce.data(), we.data() + b * h, h, oute.data(), es.data(), wsc.data(), field);
+        LazyMiddleProduct(co.data(), wo.data() + b * h, h, outo.data(), es.data(), wsc.data(), field);
+        for (size_t s = 0; s < h; ++s) p_odd[b * h + s] = field.Reduce(field.WideXor(oute[s], outo[s]));
+    }
+    for (size_t i = nb * h; i < m_odd; ++i) {
+        Wide acc = field.WideZero();
+        for (size_t a = 0; a < h; ++a) acc = field.WideXor(acc, field.WideXor(field.MulWide(ce[a], we[a + i]), field.MulWide(co[a], wo[a + i])));
+        p_odd[i] = field.Reduce(acc);
+    }
+    std::vector<Elem> hv;
+    for (int side = 1; side >= 0; --side) {
+        std::vector<Elem> osyn = p_odd;
+        if (side == 0) {
+            for (size_t i = 0; i < m_odd; ++i) osyn[i] ^= q[2 * i];
+        }
+        std::vector<Elem> conn = BerlekampMasseyOdd(osyn, two_m, m_odd, field);
+        if (conn.empty()) continue;
+        if (conn.size() == 1) return 0;     // this side has no roots
+        if (conn.size() == n + 1) return 0; // all roots on this side
+        std::vector<Elem>& gs = side ? g1 : g0;
+        std::vector<Elem>& go = side ? g0 : g1;
+        std::vector<Elem>& vs = side ? v1 : v0;
+        std::vector<Elem>& vo = side ? v0 : v1;
+        gs.assign(conn.rbegin(), conn.rend());
+        if (!CosetDivide(fft, mc, gv, n, gs, vs, go, vo, field)) continue;
+        // Power sums of both sides.
+        q1.resize(two_m);
+        for (size_t i = 0; i < m_odd; ++i) q1[2 * i] = p_odd[i];
+        for (size_t k = 2; k <= two_m; k += 2) q1[k - 1] = field.Sqr(q1[k / 2 - 1]);
+        q0.resize(two_m);
+        for (size_t k = 0; k < two_m; ++k) q0[k] = q[k] ^ q1[k];
+        return 1;
+    }
+    return -1;
+}
+
 /** One step of the root finding algorithm; finds roots of stack[pos] and adds them to roots. Stack elements >= pos are destroyed.
  *
  * It operates on a stack of polynomials. The polynomial operated on is `stack[pos]`, where elements of `stack` with index higher
@@ -1945,7 +2059,7 @@ void SmallTrace(const std::vector<typename F::Elem>& poly, typename F::Elem para
  * case the polynomial cannot be fully factored.
  */
 template<typename F>
-bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos, std::vector<typename F::Elem>& roots, bool fully_factorizable, int depth, typename F::Elem randv, const F& field, const std::vector<std::vector<typename F::Elem>>* orbit = nullptr, size_t orbit_degree = 0, const std::vector<typename F::Elem>* betas = nullptr, const MontCarry<F>* carry = nullptr) {
+bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos, std::vector<typename F::Elem>& roots, bool fully_factorizable, int depth, typename F::Elem randv, const F& field, const std::vector<std::vector<typename F::Elem>>* orbit = nullptr, size_t orbit_degree = 0, const std::vector<typename F::Elem>* betas = nullptr, const MontCarry<F>* carry = nullptr, const std::vector<typename F::Elem>* psum = nullptr) {
     auto& ppoly = stack[pos];
     // We assert ppoly.size() > 1 (instead of just ppoly.size() > 0) to additionally exclude
     // constants polynomials because
@@ -1994,6 +2108,12 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
         return *node_mc;
     };
     const size_t node_degree = poly.size() - 1;
+    // Split by power sums instead of a gcd (PowerSumSplit) when the node's
+    // power sums are known and it is in Montgomery form; its traces must
+    // then be normalized.
+    const bool use_psum = psum && carry && carry->tree && !carry->normal && node_degree >= PSUM_SPLIT_MIN && psum->size() + 1 >= 2 * node_degree;
+    bool psum_split = false;
+    std::vector<typename F::Elem> trace_v, tmp_v, psum0, psum1, ps_g0, ps_g1;
     // Limit TraceMod lifetime to free precomputed table after trace loop.
     {
         // Built only when a trace is not available from the orbit.
@@ -2019,7 +2139,7 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
                 if (carry->normal) {
                     TowerTraceSmall(poly, carry->t[l], zk, trace, field);
                 } else {
-                    MontTowerTrace(get_node_mc(), carry->t[l], poly.size() - 1, zk, trace, field);
+                    MontTowerTrace(get_node_mc(), carry->t[l], poly.size() - 1, zk, trace, field, use_psum);
                 }
                 have_trace = true;
             }
@@ -2108,6 +2228,17 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             // In every iteration we multiply randv by 2. As a result, the set
             // of randv values forms a GF(2)-linearly independent basis of splits.
             randv = field.Mul2(randv);
+            if (use_psum) {
+                MINISKETCH_COZ_BEGIN("findroots-psum");
+                MontCoset<F>& mc = get_node_mc();
+                int r = PowerSumSplit(carry->tree->fft, mc, poly, mc.Values(), trace, *psum, ps_g0, ps_g1, trace_v, tmp_v, psum0, psum1, field);
+                MINISKETCH_COZ_END("findroots-psum");
+                if (r == 1) {
+                    psum_split = true;
+                    break;
+                }
+                if (r == 0) continue;
+            }
             tmp = poly;
             MINISKETCH_COZ_BEGIN("findroots-gcd");
             FastGCD(trace, tmp, field, FastGCDCutoff(field));
@@ -2115,27 +2246,23 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             if (trace.size() != poly.size() && trace.size() > 1) break;
         }
     }
-    MakeMonic(trace, field);
     MINISKETCH_COZ_BEGIN("findroots-divmod");
-    // Values of the two factors on the node's coset, for Montgomery-form
-    // nodes: poly = trace * tmp exactly, so tmp is poly / trace pointwise
-    // there (trace has no root on the coset, as a factor of the root
-    // polynomial), one interpolation instead of a long division; the
-    // values also seed both factors' carries.
-    std::vector<typename F::Elem> trace_v, tmp_v;
-    if (carry && carry->tree && !carry->normal && node_degree >= COSET_DIV_MIN) {
+    if (psum_split) {
+        trace.swap(ps_g0);
+        tmp.swap(ps_g1);
+    } else if (carry && carry->tree && !carry->normal && node_degree >= COSET_DIV_MIN) {
+        // Values of the two factors on the node's coset, for Montgomery-form
+        // nodes: poly = trace * tmp exactly, so tmp is poly / trace pointwise
+        // there (trace has no root on the coset, as a factor of the root
+        // polynomial), one interpolation instead of a long division; the
+        // values also seed both factors' carries.
+        MakeMonic(trace, field);
         MontCoset<F>& mc = get_node_mc();
-        MontCoset<F>::Eval(carry->tree->fft, field, mc.m, mc.block, trace, trace_v);
-        std::vector<typename F::Elem> inv;
-        bool ok = BatchInvert(trace_v, inv, field);
+        bool ok = CosetDivide(carry->tree->fft, mc, mc.Values(), node_degree, trace, trace_v, tmp, tmp_v, field);
         CHECK_SAFE(ok);
         (void)ok;
-        tmp_v.resize(mc.n);
-        for (size_t j = 0; j < mc.n; ++j) tmp_v[j] = field.Mul(mc.Values()[j], inv[j]);
-        std::vector<typename F::Elem> v = tmp_v;
-        mc.ToCoefficients(v, tmp);
-        CHECK_SAFE(tmp.size() == node_degree - (trace.size() - 1) + 1 && tmp.back() == 1);
     } else {
+        MakeMonic(trace, field);
         FastDivMod(trace, poly, tmp, field, FastDivModCutoff(field));
     }
     MINISKETCH_COZ_END("findroots-divmod");
@@ -2181,11 +2308,11 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
     }
     // Now the stack is [... (trace) tmp ...]. First we factor tmp (at pos = pos+1), and then
     // we factor trace (at pos = pos).
-    if (!RecFindRoots(stack, pos + 1, roots, fully_factorizable, depth, randv, field, orbit, orbit_degree, betas, &carry_tmp)) return false;
+    if (!RecFindRoots(stack, pos + 1, roots, fully_factorizable, depth, randv, field, orbit, orbit_degree, betas, &carry_tmp, psum_split ? &psum1 : nullptr)) return false;
     // The stack position pos contains trace, the polynomial with all of poly's roots which (after
     // multiplication with randv) have trace 0. This is never the case for irreducible factors
     // (which always end up in tmp), so we can set fully_factorizable to true when recursing.
-    bool ret = RecFindRoots(stack, pos, roots, true, depth, randv, field, orbit, orbit_degree, betas, &carry_poly);
+    bool ret = RecFindRoots(stack, pos, roots, true, depth, randv, field, orbit, orbit_degree, betas, &carry_poly, psum_split ? &psum0 : nullptr);
     // Because of the above, recursion can never fail here.
     CHECK_SAFE(ret);
     return ret;
@@ -2200,7 +2327,7 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
  * has fewer roots than its degree, the empty vector is returned.
  */
 template<typename F>
-std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& poly, typename F::Elem basis, const F& field) {
+std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& poly, typename F::Elem basis, const F& field, const std::vector<typename F::Elem>* odd_power_sums = nullptr) {
     std::vector<typename F::Elem> roots;
     CHECK_RETURN(poly.size() != 0, {});
     CHECK_RETURN(basis != 0, {});
@@ -2223,7 +2350,14 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
         bool split = ComputeTraceOrbit(poly, basis, depths, field, traces, betas, &tree, &carry);
         MINISKETCH_COZ_END("findroots-orbit");
         if (!split) return {};
-        if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, poly.size() - 1, &betas, &carry)) return {};
+        // The roots' power sums Q_k (k = 1..2 * odd_power_sums->size()) from
+        // the odd ones (Q_2k = Q_k^2), if given.
+        std::vector<typename F::Elem> psum;
+        if (odd_power_sums) {
+            psum.resize(2 * odd_power_sums->size());
+            for (size_t k = 1; k <= psum.size(); ++k) psum[k - 1] = (k & 1) ? (*odd_power_sums)[k / 2] : field.Sqr(psum[k / 2 - 1]);
+        }
+        if (!RecFindRoots(stack, 0, roots, true, 0, basis, field, &traces, poly.size() - 1, &betas, &carry, odd_power_sums ? &psum : nullptr)) return {};
         CHECK_RETURN(poly.size() - 1 == roots.size(), {});
         return roots;
     }
@@ -2764,7 +2898,9 @@ public:
         if ((int)poly.size() > 1 + max_count) return -1;
         std::reverse(poly.begin(), poly.end());
         MINISKETCH_COZ_BEGIN("decode-findroots");
-        auto roots = FindRoots(poly, m_basis, m_field);
+        // The sketch's syndromes are the power sums of the roots poly is
+        // expected to have; the root finder uses them for splitting.
+        auto roots = FindRoots(poly, m_basis, m_field, &m_syndromes);
         MINISKETCH_COZ_END("decode-findroots");
         if (roots.size() == 0) return -1;
 

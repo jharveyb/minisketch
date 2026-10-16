@@ -974,6 +974,28 @@ void TestFindRootsMontgomery(const F& field, uint64_t lowmod, TestRand& rng) {
         std::sort(found.begin(), found.end());
         UT_REQUIRE(found == roots);
 
+        // With the roots' odd power sums (the decoder's syndromes) the large
+        // nodes split by power sums (PowerSumSplit); with as few as 2n - 1
+        // of them (a full sketch), and with corrupted ones, which the
+        // division check must reject in favour of the gcd.
+        for (size_t count : {c.degree + 8, c.degree}) {
+            std::vector<Elem> osyn(count, 0);
+            for (auto r : roots) {
+                Elem r2 = field.Sqr(r), pw = r;
+                for (auto& o : osyn) {
+                    o ^= pw;
+                    pw = field.Mul(pw, r2);
+                }
+            }
+            found = FindRoots(poly, basis, field, &osyn);
+            std::sort(found.begin(), found.end());
+            UT_REQUIRE(found == roots);
+            osyn[rng.RandRange(osyn.size())] ^= RandNonzeroElem(rng, field);
+            found = FindRoots(poly, basis, field, &osyn);
+            std::sort(found.begin(), found.end());
+            UT_REQUIRE(found == roots);
+        }
+
         if (c.degree > 300) continue;
         // ComputeTraceOrbit without a tree: every trace from the orbit's
         // carry must be Tr(beta_k x) mod poly.
