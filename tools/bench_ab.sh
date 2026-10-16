@@ -43,6 +43,8 @@
 #   BENCH_PREFIX
 #              command prefixed to every bench run, e.g. "taskset -c 5" to
 #              pin to one core on a big.LITTLE CPU (word-split)
+#   IMPL       if set, benchmark only this implementation (bench --impl:
+#              0 = generic, 1 = CLMUL); default all. Flag CLI only.
 #   DATA_DIR   if set, keep the measurements there for plotting: rounds.tsv
 #              (every per-round bench row, as side/ref/commit/round followed
 #              by bench's long-format columns), summary.tsv (the printed
@@ -61,6 +63,7 @@ CXXFLAGS_A="${CXXFLAGS_A:-}"
 CXXFLAGS_B="${CXXFLAGS_B:-}"
 FIELDS="${FIELDS:-}"
 DATA_DIR="${DATA_DIR:-}"
+IMPL="${IMPL:-}"
 read -ra BENCH_PREFIX_ARGS <<< "${BENCH_PREFIX:-}"
 
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/minisketch-bench-ab.XXXXXX")"
@@ -102,8 +105,9 @@ build_side() {
 run_bench() {
     local style="$1" bin="$2" syn="$3" err="$4" it="$5" bits="$6"
     if [ "$style" = flags ]; then
-        "${BENCH_PREFIX_ARGS[@]}" "$bin" --syndromes "$syn" --errors "$err" --iters "$it" --bits "$bits" --decode-only
+        "${BENCH_PREFIX_ARGS[@]}" "$bin" --syndromes "$syn" --errors "$err" --iters "$it" --bits "$bits" --decode-only ${IMPL:+--impl "$IMPL"}
     else
+        [ -z "$IMPL" ] || { echo "error: IMPL needs the flag CLI; $bin only has the positional one" >&2; return 1; }
         "${BENCH_PREFIX_ARGS[@]}" "$bin" "$syn" "$err" "$it" "$bits"
     fi
 }
@@ -149,7 +153,7 @@ if [ -n "$DATA_DIR" ]; then
         echo "A: $REF_A ($COMMIT_A)${CXXFLAGS_A:+ CXXFLAGS_A=$CXXFLAGS_A}"
         echo "B: $REF_B ($COMMIT_B)${CXXFLAGS_B:+ CXXFLAGS_B=$CXXFLAGS_B}"
         echo "configs: $CONFIGS"
-        echo "runs: $RUNS, fields: ${FIELDS:-all}, bench prefix: ${BENCH_PREFIX:-none}, flags: -g -O2"
+        echo "runs: $RUNS, fields: ${FIELDS:-all}, impl: ${IMPL:-all}, bench prefix: ${BENCH_PREFIX:-none}, flags: -g -O2"
         for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do
             [ -d "$f" ] || continue
             echo "$(basename "$(dirname "$f")"): governor $(cat "$f/scaling_governor") min $(cat "$f/scaling_min_freq") max $(cat "$f/scaling_max_freq") kHz"
