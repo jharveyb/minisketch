@@ -114,6 +114,42 @@ std::vector<typename F::Elem> PolyFromRootsRef(const std::vector<typename F::Ele
     return poly;
 }
 
+/** Textbook Berlekamp-Massey (Massey 1969): every step computes its
+ *  discrepancy, no early termination. Returns the minimal connection
+ *  polynomial (constant term 1), or {} when its degree would exceed
+ *  max_degree. Oracle for the simplified/early-terminating implementation. */
+template<typename F>
+std::vector<typename F::Elem> BerlekampMasseyRef(const std::vector<typename F::Elem>& s, size_t max_degree, const F& field) {
+    typedef typename F::Elem Elem;
+    std::vector<Elem> cur{1}, prev{1};
+    Elem b = 1;
+    size_t L = 0, shift = 1;
+    for (size_t n = 0; n < s.size(); ++n) {
+        Elem d = s[n];
+        for (size_t i = 1; i <= L && i < cur.size(); ++i) d ^= field.Mul(cur[i], s[n - i]);
+        if (d == 0) {
+            ++shift;
+            continue;
+        }
+        Elem coef = field.Mul(d, field.Inv(b));
+        std::vector<Elem> next = cur;
+        if (next.size() < prev.size() + shift) next.resize(prev.size() + shift, 0);
+        for (size_t i = 0; i < prev.size(); ++i) next[i + shift] ^= field.Mul(coef, prev[i]);
+        if (2 * L <= n) {
+            if (n + 1 - L > max_degree) return {};
+            prev = cur;
+            L = n + 1 - L;
+            b = d;
+            shift = 1;
+        } else {
+            ++shift;
+        }
+        cur = next;
+    }
+    cur.resize(L + 1, 0);
+    return cur;
+}
+
 } // namespace ut
 
 #endif

@@ -722,6 +722,39 @@ void TestBerlekampMassey(const F& field, TestRand& rng, size_t iters, size_t max
     }
 }
 
+/** BerlekampMassey (even-step skipping, early termination with tail
+ *  verification) must return exactly what the textbook iteration returns,
+ *  including the max_degree failure, on Frobenius-structured inputs: the
+ *  sketches of sets far below capacity (the early-termination regime, both
+ *  verification tiers), the same with one syndrome perturbed at a random
+ *  position (verification must fail, or the iteration must not stop early),
+ *  and unstructured random odd syndromes. */
+template<typename F>
+void TestBerlekampMasseyVsRef(const F& field, TestRand& rng, size_t iters, size_t maxcap) {
+    typedef typename F::Elem Elem;
+    const int bits = field.Bits();
+    const uint64_t field_size = bits >= 20 ? (uint64_t{1} << 20) : (uint64_t{1} << bits);
+    for (size_t i = 0; i < iters; ++i) {
+        size_t cap = 1 + rng.RandRange(maxcap);
+        std::vector<Elem> osyn(cap, 0);
+        int kind = rng.RandRange(3);
+        if (kind == 2) {
+            for (auto& s : osyn) s = RandElem(rng, field);
+        } else {
+            // Log-uniform count, so small counts (long verified tails) dominate.
+            size_t count = (size_t(1) << rng.RandRange(8)) - 1;
+            count = std::min<uint64_t>(rng.RandRange(count + 1), field_size - 1);
+            for (auto e : RandDistinctElems(rng, field, count)) AddToOddSyndromes(osyn, e, field);
+            if (kind == 1) osyn[rng.RandRange(cap)] ^= RandNonzeroElem(rng, field);
+        }
+        auto syndromes = ReconstructAllSyndromes(osyn, field);
+        size_t max_degree = rng.RandRange(2) ? cap : rng.RandRange(cap + 1);
+        auto got = BerlekampMassey(syndromes, max_degree, field);
+        auto want = BerlekampMasseyRef(syndromes, max_degree, field);
+        UT_REQUIRE(got == want);
+    }
+}
+
 template<typename F>
 void TestFindRoots(const F& field, uint64_t lowmod, TestRand& rng, size_t iters, size_t maxroots) {
     typedef typename F::Elem Elem;
@@ -799,6 +832,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestSubquadraticGCD(field, rng, 10);
     TestSyndromes(field, lowmod, rng, 128, 12);
     TestBerlekampMassey(field, rng, 128, 10);
+    TestBerlekampMasseyVsRef(field, rng, 200, 160);
     TestFindRoots(field, lowmod, rng, 64, 8);
     TestDecodeStagesLarge(field, rng, 256);
 }

@@ -39,6 +39,23 @@
 #ifndef MINISKETCH_HGCD_ITER_CROSSOVER
 #define MINISKETCH_HGCD_ITER_CROSSOVER 24
 #endif
+/* Berlekamp-Massey early termination: a tail verification is attempted after
+ * a zero discrepancy once at least MIN_PREFIX syndromes are processed, the
+ * processed count exceeds twice the LFSR length by GAP, and at least MIN_TAIL
+ * syndromes remain. */
+#ifndef MINISKETCH_BM_VERIFY_GAP
+#define MINISKETCH_BM_VERIFY_GAP 2
+#endif
+#ifndef MINISKETCH_BM_VERIFY_MIN_PREFIX
+#define MINISKETCH_BM_VERIFY_MIN_PREFIX 0
+#endif
+/* Minimum LFSR length for the additive-FFT tail verification. */
+#ifndef MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE
+#define MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE 24
+#endif
+#ifndef MINISKETCH_BM_VERIFY_MIN_TAIL
+#define MINISKETCH_BM_VERIFY_MIN_TAIL 32
+#endif
 
 static const size_t TRACEMOD_POLYMUL_CUTOFF = MINISKETCH_TRACEMOD_POLYMUL_CUTOFF;
 static const size_t TRACEMOD_TABLE_CUTOFF = MINISKETCH_TRACEMOD_TABLE_CUTOFF;
@@ -47,6 +64,10 @@ static const size_t TRACEMOD_FFT_CUTOFF = MINISKETCH_TRACEMOD_FFT_CUTOFF;
 static const size_t FAST_DIVMOD_CUTOFF = MINISKETCH_FAST_DIVMOD_CUTOFF;
 static const size_t HGCD_CUTOFF = MINISKETCH_HGCD_CUTOFF;
 static const size_t HGCD_ITER_CROSSOVER = MINISKETCH_HGCD_ITER_CROSSOVER;
+static const size_t BM_VERIFY_GAP = MINISKETCH_BM_VERIFY_GAP;
+static const size_t BM_VERIFY_MIN_PREFIX = MINISKETCH_BM_VERIFY_MIN_PREFIX;
+static const size_t BM_VERIFY_MIN_TAIL = MINISKETCH_BM_VERIFY_MIN_TAIL;
+static const size_t BM_VERIFY_FFT_MIN_DEGREE = MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -1104,6 +1125,129 @@ std::vector<typename F::Elem> FindRoots(const std::vector<typename F::Elem>& pol
     return roots;
 }
 
+/** Check whether the LFSR with connection polynomial conn (conn[0] = 1) generates
+ * every odd-indexed syndrome from position start on: for all even n in
+ * [start, syndromes.size()), sum_i conn[i]*syndromes[n-i] == 0. Requires
+ * start >= deg(conn) + 2.
+ *
+ * The constraints are coefficients of the product conn(x)*S(x); restricted to
+ * even n they split by parity into conn_even*S_even + x*conn_odd*S_odd (in
+ * y = x^2), so each block of B positions costs two products of half-length
+ * operands, computed with the additive FFT (transforms of the two conn
+ * halves are prepared once and the two products are summed in the
+ * evaluation domain, one inverse transform per block) or with the
+ * Karatsuba/naive tiers. Stops at the first block containing a violation. */
+template<typename F>
+bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const std::vector<typename F::Elem>& syndromes, size_t start, const F& field) {
+    typedef typename F::Elem Elem;
+    const size_t L = conn.size() - 1;
+    CHECK_SAFE(start >= L + 2);
+    std::vector<Elem> conn_e, conn_o;
+    for (size_t i = 0; i <= L; ++i) (i & 1 ? conn_o : conn_e).push_back(conn[i]);
+    while (!conn_o.empty() && conn_o.back() == 0) conn_o.pop_back();
+    // Positions n = 2k: the constraint is (conn_e*S_e)[k] + (conn_o*S_o)[k-1] == 0
+    // with S_e[b] = syndromes[2b] and S_o[b] = syndromes[2b+1]. A block covers
+    // k in [p, p+B); windows start W = L/2 positions earlier (one more for
+    // S_o), so both products put position k at the same index k - p + W.
+    const size_t W = L / 2;
+    const size_t k_end = syndromes.size() / 2 + (syndromes.size() & 1);
+    size_t p = (start + 1) / 2;
+    if (p >= k_end) return true;
+
+    const size_t le = conn_e.size(), lo = conn_o.size();
+    int fft_m = 0;
+    size_t block;
+    if (TraceModFFTCapable(field) && L >= BM_VERIFY_FFT_MIN_DEGREE) {
+        // Window length B+W plus the operand length must fit the transform
+        // without wraparound; 2^fft_m >= 4*le keeps at least ~3/4 of every
+        // transform useful.
+        fft_m = 1;
+        while ((size_t(1) << fft_m) < 4 * le) ++fft_m;
+        if (fft_m > field.Bits()) fft_m = 0;
+    }
+    if (fft_m) {
+        block = (size_t(1) << fft_m) + 1 - W - std::max(le, lo);
+    } else {
+        block = std::max<size_t>(2 * L, 64);
+    }
+
+    TraceModScratch<F> scratch;
+    std::vector<Elem> win_e, win_o, prod_e, prod_o, conn_e_fft, conn_o_fft;
+    if (fft_m) {
+        scratch.fft.Prepare(conn_e, fft_m, field, conn_e_fft);
+        if (lo) scratch.fft.Prepare(conn_o, fft_m, field, conn_o_fft);
+    }
+    const size_t n_points = size_t(1) << fft_m;
+    while (p < k_end) {
+        size_t b = std::min(block, k_end - p);
+        // win_e[j] = S_e[p - W + j], win_o[j] = S_o[p - 1 - W + j], j < b + W.
+        win_e.resize(b + W);
+        win_o.resize(b + W);
+        for (size_t j = 0; j < b + W; ++j) {
+            size_t ie = 2 * (p - W + j), io = 2 * (p - 1 - W + j) + 1;
+            win_e[j] = ie < syndromes.size() ? syndromes[ie] : Elem(0);
+            win_o[j] = io < syndromes.size() ? syndromes[io] : Elem(0);
+        }
+        if (fft_m) {
+            prod_e.assign(n_points, 0);
+            std::copy(win_e.begin(), win_e.end(), prod_e.begin());
+            scratch.fft.FFT(prod_e, fft_m, field);
+            for (size_t i = 0; i < n_points; ++i) prod_e[i] = field.Mul(prod_e[i], conn_e_fft[i]);
+            if (lo) {
+                prod_o.assign(n_points, 0);
+                std::copy(win_o.begin(), win_o.end(), prod_o.begin());
+                scratch.fft.FFT(prod_o, fft_m, field);
+                for (size_t i = 0; i < n_points; ++i) prod_e[i] ^= field.Mul(prod_o[i], conn_o_fft[i]);
+            }
+            scratch.fft.IFFT(prod_e, fft_m, field);
+            for (size_t j = W; j < W + b; ++j) {
+                // Positions past the end of the sequence read zero padding.
+                if (2 * (p - W + j) >= syndromes.size()) break;
+                if (prod_e[j] != 0) return false;
+            }
+        } else {
+            TraceModPolyMulFull(conn_e, win_e, prod_e, field, scratch, 0);
+            prod_o.clear();
+            if (lo) TraceModPolyMulFull(conn_o, win_o, prod_o, field, scratch, 0);
+            for (size_t j = W; j < W + b; ++j) {
+                if (2 * (p - W + j) >= syndromes.size()) break;
+                Elem v = (j < prod_e.size() ? prod_e[j] : Elem(0)) ^ (j < prod_o.size() ? prod_o[j] : Elem(0));
+                if (v != 0) return false;
+            }
+        }
+        p += b;
+    }
+    return true;
+}
+
+/** Find the minimal LFSR (connection polynomial, constant term 1) generating
+ * syndromes, or {} if its degree would exceed max_degree.
+ *
+ * The input must have the Frobenius structure of power sums in
+ * characteristic 2, syndromes[2k+1] = syndromes[k]^2 (as produced by
+ * ReconstructAllSyndromes). Two consequences make this cheaper than the
+ * textbook iteration while returning exactly the same polynomial:
+ *
+ *  - The discrepancy at every even-indexed syndrome S_{2k} (array index
+ *    2k-1) is identically zero, so those steps are skipped. This is the
+ *    classical binary-BCH simplification of Berlekamp's algorithm
+ *    (Berlekamp, "Algebraic Coding Theory", 1968), and holds for every
+ *    Frobenius-structured sequence, not just genuine power sums (the unit
+ *    tests compare against the unsimplified iteration on random inputs).
+ *
+ *  - Early termination: once the LFSR length L has stopped growing, the
+ *    current connection polynomial is checked against all remaining
+ *    odd-indexed syndromes at once with fast polynomial products
+ *    (BerlekampMasseyVerifyTail). If it generates them all, it also
+ *    generates the even-indexed ones: with S(x) = sum s_k x^k, the structure
+ *    is S(x)^2 = S_even(x), from which
+ *        [x^2j](conn*S) = ([x^j](conn*S))^2 + [x^2j](conn * (conn*S mod x^(L+1))),
+ *    and for j > L both terms vanish once conn generates S_{L+1..2j-1}
+ *    (by induction over j, as verification starts past 2L). So the full
+ *    iteration would see zero discrepancies throughout the tail and return
+ *    the same polynomial. This replaces the O(c*L) tail of serial
+ *    discrepancy computations by O(c log L) (FFT tier) work, which matters
+ *    when the number of differences is far below the capacity. */
 template<typename F>
 std::vector<typename F::Elem> BerlekampMassey(const std::vector<typename F::Elem>& syndromes, size_t max_degree, const F& field) {
     std::vector<typename F::Multiplier> table;
@@ -1118,9 +1262,14 @@ std::vector<typename F::Elem> BerlekampMassey(const std::vector<typename F::Elem
     typename F::Elem b = 1, b_inv = 1;
     bool b_have_inv = true;
     table.reserve(syndromes.size());
+    // Earliest number of processed syndromes at which a tail verification
+    // is attempted; pushed back geometrically after a failed attempt.
+    size_t next_verify = BM_VERIFY_MIN_PREFIX;
 
     for (size_t n = 0; n != syndromes.size(); ++n) {
         table.emplace_back(field, syndromes[n]);
+        // Index n holds S_{n+1}; even-indexed S have zero discrepancy.
+        if (n & 1) continue;
         auto discrepancy = syndromes[n];
         for (size_t i = 1; i < current.size(); ++i) discrepancy ^= table[n - i](current[i]);
         if (discrepancy != 0) {
@@ -1141,6 +1290,15 @@ std::vector<typename F::Elem> BerlekampMassey(const std::vector<typename F::Elem
                 std::swap(prev, tmp);
                 b = discrepancy;
                 b_have_inv = false;
+            }
+        } else {
+            // A zero discrepancy at an odd step with 2L + BM_VERIFY_GAP <= n + 1
+            // processed syndromes: the LFSR has likely converged.
+            size_t done = n + 1;
+            size_t L = current.size() - 1;
+            if (done >= next_verify && done >= 2 * L + BM_VERIFY_GAP && syndromes.size() - done >= BM_VERIFY_MIN_TAIL) {
+                if (BerlekampMasseyVerifyTail(current, syndromes, done, field)) break;
+                next_verify = done + done / 2;
             }
         }
     }
