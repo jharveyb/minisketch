@@ -40,6 +40,11 @@
 #ifndef MINISKETCH_HGCD_ITER_CROSSOVER
 #define MINISKETCH_HGCD_ITER_CROSSOVER 24
 #endif
+/* Divisor degree below which normal Euclid steps (on lazily-reducing
+ * fields) use the inversion-free pseudo-remainder. */
+#ifndef MINISKETCH_GCD_INVFREE_MAX
+#define MINISKETCH_GCD_INVFREE_MAX 128
+#endif
 /* Divisor length above which DivMod and GCD use lazy reduction (on fields
  * that support it). */
 #ifndef MINISKETCH_DIVMOD_LAZY_MIN
@@ -93,6 +98,7 @@ static const size_t HGCD_CUTOFF = MINISKETCH_HGCD_CUTOFF;
 static const size_t HGCD_ITER_CROSSOVER = MINISKETCH_HGCD_ITER_CROSSOVER;
 static const size_t BM_VERIFY_GAP = MINISKETCH_BM_VERIFY_GAP;
 static const size_t DIVMOD_LAZY_MIN = MINISKETCH_DIVMOD_LAZY_MIN;
+static const size_t GCD_INVFREE_MAX = MINISKETCH_GCD_INVFREE_MAX;
 static const size_t BM_VERIFY_MIN_PREFIX = MINISKETCH_BM_VERIFY_MIN_PREFIX;
 static const size_t BM_VERIFY_MIN_TAIL = MINISKETCH_BM_VERIFY_MIN_TAIL;
 static const size_t BM_VERIFY_FFT_MIN_DEGREE = MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE;
@@ -210,7 +216,26 @@ void GCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, con
         while (b.size() > 1) {
             divided = true;
             const size_t db = b.size() - 1;
-            if (a.size() > db) {
+            if (a.size() == db + 2 && db < GCD_INVFREE_MAX) {
+                // Normal step (quotient degree 1), inversion-free: with
+                // beta = lc(b), the pseudo-remainder
+                //   beta^2*a - (beta*a_n*x + beta*a_{n-1} - a_n*b_{m-1})*b
+                // is beta^2 times the remainder; the gcd is unaffected and
+                // the result is normalized once at the end. One more
+                // product per coefficient instead of a field inversion.
+                typedef typename F::Wide Wide;
+                const auto beta = b[db], an = a[db + 1], an1 = a[db];
+                const auto p1 = field.Mul(beta, an);
+                const auto p0 = field.Mul(beta, an1) ^ field.Mul(an, b[db - 1]);
+                const auto beta2 = field.Sqr(beta);
+                r.resize(db);
+                r[0] = field.Reduce(field.WideXor(field.MulWide(beta2, a[0]), field.MulWide(p0, b[0])));
+                for (size_t j = 1; j < db; ++j) {
+                    Wide acc = field.WideXor(field.MulWide(beta2, a[j]), field.MulWide(p0, b[j]));
+                    r[j] = field.Reduce(field.WideXor(acc, field.MulWide(p1, b[j - 1])));
+                }
+                a.swap(r);
+            } else if (a.size() > db) {
                 q.resize(a.size() - db);
                 r.resize(db);
                 LazyDivRem(a.data(), a.size(), b.data(), db, field.Inv(b.back()), q.data(), r.data(), field);
