@@ -26,7 +26,7 @@
 #define MINISKETCH_TRACEMOD_TABLE_CUTOFF 512
 #endif
 #ifndef MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF
-#define MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF 448
+#define MINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF 704
 #endif
 #ifndef MINISKETCH_TRACEMOD_FFT_CUTOFF
 #define MINISKETCH_TRACEMOD_FFT_CUTOFF 128
@@ -296,11 +296,11 @@ constexpr bool TraceModCheapScalarMul() {
 /** The degree at which TraceMod switches from the square-table reducer to
  * the reciprocal reducer. For field implementations with a cheap scalar
  * Multiplier (CLMUL) the additive-FFT tier speeds up the reciprocal path,
- * but the lazily-reducing square-table reducer is faster still, so the
- * crossover sits slightly below the original value (measured on Zen 3,
- * Haswell and Cortex-A76; the table no longer fits L2 there, but streams
- * well). The generic fields keep the original value: their reciprocal
- * path pays slow one-off products in the FFT. */
+ * but the lazily-reducing, streaming square-table reducer is faster still,
+ * so the crossover sits above the original value (measured: ~700 on
+ * Haswell, above 768 on Cortex-A76; the table far exceeds L2 there but is
+ * streamed sequentially). The generic fields keep the original value:
+ * their reciprocal path pays slow one-off products in the FFT. */
 template<typename F>
 size_t TraceModTableCutoff(const F& field) {
     return (TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) ? TRACEMOD_FFT_TABLE_CUTOFF : TRACEMOD_TABLE_CUTOFF;
