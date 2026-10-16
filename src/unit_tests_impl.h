@@ -753,6 +753,27 @@ void TestBerlekampMasseyVsRef(const F& field, TestRand& rng, size_t iters, size_
         auto want = BerlekampMasseyRef(syndromes, max_degree, field);
         UT_REQUIRE(got == want);
     }
+    // The tail check itself (whose failure would only cost speed, not
+    // change BM's output): the odd syndromes of a root set satisfy the
+    // recurrence with the squared connection polynomial past the prefix,
+    // and a perturbed tail syndrome is rejected - for lengths on both sides
+    // of the FFT threshold.
+    for (size_t count : {size_t(3), size_t(17), size_t(BM_VERIFY_FFT_MIN_DEGREE + 5)}) {
+        if (count + 2 >= field_size) continue;
+        size_t cap = count + 40 + rng.RandRange(40);
+        auto roots = RandDistinctElems(rng, field, count);
+        std::vector<Elem> osyn(cap, 0);
+        for (auto e : roots) AddToOddSyndromes(osyn, e, field);
+        std::vector<Elem> conn{1};
+        for (auto m : roots) {
+            std::vector<Elem> factor{1, m};
+            conn = PolyMulRef(conn, factor, field);
+        }
+        size_t j0 = count + 1 + rng.RandRange(8);
+        UT_REQUIRE(BerlekampMasseyVerifyTail(conn, osyn, j0, cap, field));
+        osyn[j0 + rng.RandRange(cap - j0)] ^= RandNonzeroElem(rng, field);
+        UT_REQUIRE(!BerlekampMasseyVerifyTail(conn, osyn, j0, cap, field));
+    }
     // A few LFSR lengths at and above the FFT verification threshold (the
     // random counts above stay below it), with and without a perturbation.
     if (field_size - 1 < BM_VERIFY_FFT_MIN_DEGREE + 8) return;
