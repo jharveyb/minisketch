@@ -463,14 +463,23 @@ s<sub>k</sub>² (equivalently S(x)² = S<sub>even</sub>(x)). Two consequences:
   syndromes (`BerlekampMasseyOdd` derives s<sub>2k</sub> = s<sub>k</sub>²
   only for the prefix it walks), and the tail check reads half the memory.
 
-The tail check (`BerlekampMasseyVerifyTail`) has two tiers:
-* **FFT.** One product per block of the squared Λ with a window of u,
+The tail check (`BerlekampMasseyVerifyTail`) has these tiers on
+lazily-reducing fields:
+* **Direct** (L < 64). One carry-less product per term, no serial
+  dependency, and each coefficient load shared across 4 positions.
+* **Lazy Karatsuba middle products** (64 ≤ L < 512). Each block of n
+  positions is a middle product of the reversed Λ² with a window of u.
+  The transposed-Karatsuba identity low = α + MP(c₀, w₀+w₁),
+  high = α + MP(c₁, w₁+w₂), α = MP(c₀+c₁, w₁) needs three half-size
+  middle products instead of four, with only XORs of the input windows,
+  and every output is reduced once. That is ~33 products per position at
+  L = 64 instead of 65. It beats the direct check from L ≈ 32 on the i7
+  and ≈ 96 on the Pi, and the FFT up to L ≈ 384 on both.
+* **FFT** (L ≥ 512). One product per block of Λ² with a window of u,
   with Λ²'s transform prepared once: two transforms per block.
-* **Direct.** On lazily-reducing fields, a direct check costs one
-  carry-less product per term, has no serial dependency, and shares each
-  coefficient load across 4 positions. It is faster up to L ≈ 192 (on the
-  i7 the FFT already wins from L ≈ 128; on the Pi the direct check is
-  ahead through 192).
+
+Generic fields use the FFT from L = 40, and below that a direct check
+that builds each coefficient's Multiplier table once for the whole tail.
 
 BM goes from a serial O(c·n) to O(n²) + O(c·n) independent products, and
 it builds Multipliers only for the processed prefix. On the generic
@@ -554,43 +563,55 @@ The cheaper schoolbook primitives moved several crossovers:
   768 on Cortex-A76).
 * `HGCD_CUTOFF`: 1024 → 4096; the lazy Euclid beats the half-gcd at every
   degree up to 4096.
-* BM FFT verification: L ≥ 192 on CLMUL fields, L ≥ 40 on generic fields.
+* BM tail check: direct < 64 ≤ Karatsuba < 512 ≤ FFT on CLMUL fields;
+  FFT from L ≥ 40 on generic fields.
+* Shared orbit: from root degree 8 (was 16).
 
 ### Measured
 
-Interleaved A/B, min over rounds (`bench --decode-only`), 64-bit field
-unless noted, original tip (before this series) → after the HGCD cutoff
-commit. The inversion-free Euclid step adds a further 5–10% at
-1024/32…256 on both machines.
+Interleaved A/B, min over 3 rounds (`bench --decode-only`), 64-bit field
+unless noted. "Before" is the tip before this series and "after" is the
+end of the series, all commits included.
 
 | capacity/differences | i7-4770 CLMUL | Pi 5 (A76) PMULL |
 |---|---|---|
-| 1024/32 | 0.319 → 0.098 ms (3.3×) | 0.576 → 0.139 ms (4.1×) |
-| 1024/64 | 0.899 → 0.250 ms (3.6×) | 1.686 → 0.341 ms (4.9×) |
-| 1024/128 | 2.80 → 0.76 ms (3.7×) | 5.33 → 1.03 ms (5.2×) |
-| 1024/256 | 8.15 → 2.58 ms (3.2×) | 14.91 → 3.37 ms (4.4×) |
-| 1024/512 | 25.3 → 9.1 ms (2.8×) | 46.8 → 11.1 ms (4.2×) |
-| 2048/64 | 1.157 → 0.288 ms (4.0×) | 2.180 → 0.396 ms (5.5×) |
-| 2048/256 | 9.11 → 2.76 ms (3.3×) | 16.88 → 3.61 ms (4.7×) |
-| 4096/32 | 0.694 → 0.166 ms (4.2×) | 1.341 → 0.238 ms (5.6×) |
-| 4096/64 | 1.666 → 0.374 ms (4.5×) | 3.178 → 0.513 ms (6.2×) |
-| 4096/128 | 4.30 → 0.99 ms (4.4×) | 8.27 → 1.36 ms (6.1×) |
-| 4096/256 | 11.14 → 2.91 ms (3.8×) | 20.83 → 3.87 ms (5.4×) |
-| 1024/1024 | 67.3 → 21.8 ms (3.1×) | 122.6 → 35.8 ms (3.4×) |
-| 32-bit 1024/64 | 0.780 → 0.187 ms (4.2×) | 0.693 → 0.228 ms (3.0×) |
-| 32-bit 4096/256 | 9.96 → 2.08 ms (4.8×) | 9.06 → 2.43 ms (3.7×) |
-| generic 1024/64 | 4.00 → 1.89 ms (2.1×) | 5.86 → 2.88 ms (2.0×) |
-| generic 4096/64 | 9.82 → 3.13 ms (3.1×) | 12.65 → 4.84 ms (2.6×) |
+| 1024/16 | 0.123 → 0.034 ms (3.6×) | 0.224 → 0.046 ms (4.9×) |
+| 1024/32 | 0.318 → 0.077 ms (4.1×) | 0.589 → 0.104 ms (5.7×) |
+| 1024/64 | 0.900 → 0.201 ms (4.5×) | 1.697 → 0.286 ms (5.9×) |
+| 1024/128 | 2.80 → 0.66 ms (4.3×) | 5.29 → 0.90 ms (5.9×) |
+| 1024/256 | 8.18 → 2.41 ms (3.4×) | 14.90 → 3.03 ms (4.9×) |
+| 1024/512 | 22.3 → 9.0 ms (2.5×) | 39.9 → 10.8 ms (3.7×) |
+| 2048/64 | 1.154 → 0.228 ms (5.1×) | 2.174 → 0.329 ms (6.6×) |
+| 2048/256 | 9.19 → 2.50 ms (3.7×) | 16.92 → 3.16 ms (5.4×) |
+| 4096/32 | 0.697 → 0.133 ms (5.2×) | 1.344 → 0.168 ms (8.0×) |
+| 4096/64 | 1.669 → 0.285 ms (5.9×) | 3.172 → 0.414 ms (7.7×) |
+| 4096/128 | 4.34 → 0.78 ms (5.5×) | 8.29 → 1.09 ms (7.6×) |
+| 4096/256 | 11.10 → 2.64 ms (4.2×) | 20.84 → 3.29 ms (6.3×) |
+| 8192/64 | 2.744 → 0.400 ms (6.9×) | 5.159 → 0.582 ms (8.9×) |
+| 8192/256 | 15.13 → 2.90 ms (5.2×) | 28.66 → 3.66 ms (7.8×) |
+| 1024/1024 | 66.9 → 21.2 ms (3.2×) | 120.5 → 35.0 ms (3.4×) |
+| 32-bit 1024/64 | 0.778 → 0.165 ms (4.7×) | 0.694 → 0.204 ms (3.4×) |
+| 32-bit 4096/256 | 9.89 → 1.86 ms (5.3×) | 9.08 → 2.16 ms (4.2×) |
+| generic 1024/64 | 3.93 → 1.96 ms (2.0×) | 5.85 → 2.70 ms (2.2×) |
+| generic 4096/64 | 9.56 → 2.92 ms (3.3×) | 12.76 → 4.18 ms (3.1×) |
+
+Failed decodes (more differences than capacity) got faster too, from the
+exact root-level factorizability test. On the i7, capacity 1024 with 1100
+differences went 28.4 → 12.6 ms, and capacity 4096 with 4200 went
+192 → 76 ms.
 
 Stage split at 1024/256 on the i7 afterwards: the root chain is ~50%,
 node divisions ~14%, inversions ~6%, orbit accumulation and reducer
 construction ~5% each, BM ~6%.
 
-Later commits in the series, measured against the preceding commit on
+Per-commit gains for the later commits, against the preceding commit on
 i7-4770 / Pi 5:
 * Tower basis: 1024/32 +12% / +12%, 1024/64 +11% / +7%.
 * Odd-syndrome BM: 4096/16 +27% / +45%, 4096/32 +14% / +28%,
   8192/64 +9% / +24%.
+* Orbit from root degree 8 (was 16): 1024/12 +43% / +51%.
+* Karatsuba middle-product tail check: 4096/128 +12% / +2%,
+  8192/128 +22% / +5%.
 
 ### Measured negative results in this series
 
