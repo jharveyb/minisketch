@@ -121,6 +121,35 @@ void PolyMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::E
     while (val.size() > 0 && val.back() == 0) val.pop_back();
 }
 
+/** Division in dot-product form for lazily-reducing fields: a (length na)
+ * divided by b (degree db, inv = b[db]^-1, 1 for monic b) gives the
+ * quotient q (length na - db, requires na > db) and remainder r (length
+ * db). Every coefficient is one register-accumulated unreduced dot product
+ * reduced once:
+ *     q_i = inv * (a_{db+i} + sum_{t>i} q_t b_{db+i-t}),
+ *     r_j = a_j + sum_t q_t b_{j-t}.
+ * No accumulator array is kept (cf. the row-update form of DivMod), so
+ * the only memory traffic is reading the operands. q and r may not alias
+ * a or b. */
+template<typename F>
+void LazyDivRem(const typename F::Elem* a, size_t na, const typename F::Elem* b, size_t db, typename F::Elem inv, typename F::Elem* q, typename F::Elem* r, const F& field) {
+    typedef typename F::Wide Wide;
+    const size_t nq = na - db;
+    for (size_t i = nq; i-- > 0; ) {
+        Wide acc = field.WideFrom(a[db + i]);
+        const size_t tmax = std::min(nq - 1, i + db);
+        for (size_t t = i + 1; t <= tmax; ++t) acc = field.WideXor(acc, field.MulWide(q[t], b[db + i - t]));
+        auto v = field.Reduce(acc);
+        q[i] = inv == 1 ? v : field.Mul(v, inv);
+    }
+    for (size_t j = 0; j < db; ++j) {
+        Wide acc = field.WideFrom(a[j]);
+        const size_t tmax = std::min(nq - 1, j);
+        for (size_t t = 0; t <= tmax; ++t) acc = field.WideXor(acc, field.MulWide(q[t], b[j - t]));
+        r[j] = field.Reduce(acc);
+    }
+}
+
 /** Compute the quotient of a polynomial division of val by mod, putting the quotient in div and the remainder in val. */
 template<typename F>
 void DivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::Elem>& val, std::vector<typename F::Elem>& div, const F& field) {
@@ -133,22 +162,10 @@ void DivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::El
     CHECK_SAFE(val.back() != 0);
     div.resize(val.size() - mod.size() + 1);
     if (F::LAZY_REDUCE && modsize > DIVMOD_LAZY_MIN) {
-        // Keep the dividend unreduced: each coefficient is reduced once,
-        // when it becomes the leading term (or at the end, for the
-        // remainder), instead of after every row update.
-        typedef typename F::Wide Wide;
         const size_t dm = modsize - 1;
-        std::vector<Wide> w(val.size());
-        for (size_t i = 0; i < val.size(); ++i) w[i] = field.WideFrom(val[i]);
-        for (size_t top = val.size(); top-- > dm; ) {
-            auto term = field.Reduce(w[top]);
-            div[top - dm] = term;
-            if (term == 0) continue;
-            Wide* base = w.data() + top - dm;
-            for (size_t x = 0; x < dm; ++x) base[x] = field.WideXor(base[x], field.MulWide(term, mod[x]));
-        }
-        val.resize(dm);
-        for (size_t i = 0; i < dm; ++i) val[i] = field.Reduce(w[i]);
+        std::vector<typename F::Elem> rem(dm);
+        LazyDivRem(val.data(), val.size(), mod.data(), dm, typename F::Elem(1), div.data(), rem.data(), field);
+        val.swap(rem);
         return;
     }
     while (val.size() >= modsize) {
@@ -186,26 +203,19 @@ void GCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, con
         // Euclid without per-step normalization: the divisor's inverse
         // leading coefficient is folded into the quotient terms (one
         // multiplication each) instead of rescaling the divisor to monic,
-        // and the dividend is reduced lazily as in DivMod. The result is
-        // made monic once at the end.
-        typedef typename F::Wide Wide;
-        std::vector<Wide> w;
+        // and each step is one lazy dot-product division (LazyDivRem).
+        // The result is made monic once at the end.
+        std::vector<typename F::Elem> q, r;
         bool divided = false;
         while (b.size() > 1) {
             divided = true;
             const size_t db = b.size() - 1;
-            const auto inv = field.Inv(b.back());
-            w.resize(a.size());
-            for (size_t i = 0; i < a.size(); ++i) w[i] = field.WideFrom(a[i]);
-            for (size_t top = a.size(); top-- > db; ) {
-                auto lead = field.Reduce(w[top]);
-                if (lead == 0) continue;
-                auto term = field.Mul(lead, inv);
-                Wide* base = w.data() + top - db;
-                for (size_t x = 0; x < db; ++x) base[x] = field.WideXor(base[x], field.MulWide(term, b[x]));
+            if (a.size() > db) {
+                q.resize(a.size() - db);
+                r.resize(db);
+                LazyDivRem(a.data(), a.size(), b.data(), db, field.Inv(b.back()), q.data(), r.data(), field);
+                a.swap(r);
             }
-            a.resize(db);
-            for (size_t i = 0; i < db; ++i) a[i] = field.Reduce(w[i]);
             while (!a.empty() && a.back() == 0) a.pop_back();
             std::swap(a, b);
         }
