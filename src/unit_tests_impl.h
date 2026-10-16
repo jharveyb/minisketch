@@ -788,6 +788,36 @@ void TestBerlekampMasseyVsRef(const F& field, TestRand& rng, size_t iters, size_
     }
 }
 
+/** Exhaustive version of the BM oracle comparison for tiny fields: every
+ *  odd-syndrome vector up to the largest capacity with at most ~2^12
+ *  vectors, every max_degree. (Too short for the tail check, which the
+ *  random cases cover; this pins the even-step skip and the degree-limit
+ *  logic completely.) */
+template<typename F>
+void TestBerlekampMasseyExhaustive(const F& field) {
+    typedef typename F::Elem Elem;
+    const int bits = field.Bits();
+    if (bits > 4) return;
+    const uint64_t q = uint64_t{1} << bits;
+    for (size_t cap = 1; ; ++cap) {
+        uint64_t total = 1;
+        for (size_t i = 0; i < cap; ++i) total *= q;
+        if (total > 4096) break;
+        std::vector<Elem> osyn(cap);
+        for (uint64_t v = 0; v < total; ++v) {
+            uint64_t t = v;
+            for (size_t i = 0; i < cap; ++i) {
+                osyn[i] = Elem(t % q);
+                t /= q;
+            }
+            auto syndromes = ReconstructAllSyndromes(osyn, field);
+            for (size_t max_degree = 0; max_degree <= cap; ++max_degree) {
+                UT_REQUIRE(BerlekampMassey(syndromes, max_degree, field) == BerlekampMasseyRef(syndromes, max_degree, field));
+            }
+        }
+    }
+}
+
 /** FindRoots on degrees that take the Frobenius-orbit path: square-free
  *  split polynomials must yield their roots; a non-split factor or a
  *  repeated root must make it fail. */
@@ -928,6 +958,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     TestSyndromes(field, lowmod, rng, 128, 12);
     TestBerlekampMassey(field, rng, 128, 10);
     TestBerlekampMasseyVsRef(field, rng, 200, 160);
+    TestBerlekampMasseyExhaustive(field);
     TestFindRoots(field, lowmod, rng, 64, 8);
     TestFindRootsOrbit(field, lowmod, rng, 16, 64);
     TestDecodeStagesLarge(field, rng, 256);
