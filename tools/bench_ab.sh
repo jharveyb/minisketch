@@ -43,6 +43,11 @@
 #   BENCH_PREFIX
 #              command prefixed to every bench run, e.g. "taskset -c 5" to
 #              pin to one core on a big.LITTLE CPU (word-split)
+#   DATA_DIR   if set, keep the measurements there for plotting: rounds.tsv
+#              (every per-round bench row, as side/ref/commit/round followed
+#              by bench's long-format columns), summary.tsv (the printed
+#              table, one row per config, side and implementation) and
+#              meta.txt (host, refs, commits, flags, CPU frequency state)
 
 set -euo pipefail
 
@@ -55,6 +60,7 @@ NOISE_PCT="${NOISE_PCT:-3}"
 CXXFLAGS_A="${CXXFLAGS_A:-}"
 CXXFLAGS_B="${CXXFLAGS_B:-}"
 FIELDS="${FIELDS:-}"
+DATA_DIR="${DATA_DIR:-}"
 read -ra BENCH_PREFIX_ARGS <<< "${BENCH_PREFIX:-}"
 
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/minisketch-bench-ab.XXXXXX")"
@@ -130,6 +136,29 @@ echo "Building B: $REF_B${CXXFLAGS_B:+ ($CXXFLAGS_B)}"
 BIN_B=$(build_side "$REF_B" b "$CXXFLAGS_B")
 STYLE_A=$(probe_side "$REF_A" "$BIN_A")
 STYLE_B=$(probe_side "$REF_B" "$BIN_B")
+COMMIT_A=$(git rev-parse --short "${REF_A/#./HEAD}")
+COMMIT_B=$(git rev-parse --short "${REF_B/#./HEAD}")
+[ "$REF_A" = . ] && COMMIT_A="$COMMIT_A+worktree"
+[ "$REF_B" = . ] && COMMIT_B="$COMMIT_B+worktree"
+if [ -n "$DATA_DIR" ]; then
+    mkdir -p "$DATA_DIR"
+    printf 'side\tref\tcommit\tround\tmetric\tbits\tcapacity\terrors\tdata_len\timplementation\tvalue\n' > "$DATA_DIR/rounds.tsv"
+    {
+        echo "host: $(uname -n) ($(uname -m)), $(date -Is)"
+        echo "cpu: $(lscpu 2> /dev/null | sed -n 's/^Model name: *//p' | head -1)"
+        echo "A: $REF_A ($COMMIT_A)${CXXFLAGS_A:+ CXXFLAGS_A=$CXXFLAGS_A}"
+        echo "B: $REF_B ($COMMIT_B)${CXXFLAGS_B:+ CXXFLAGS_B=$CXXFLAGS_B}"
+        echo "configs: $CONFIGS"
+        echo "runs: $RUNS, fields: ${FIELDS:-all}, bench prefix: ${BENCH_PREFIX:-none}, flags: -g -O2"
+        for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do
+            [ -d "$f" ] || continue
+            echo "$(basename "$(dirname "$f")"): governor $(cat "$f/scaling_governor") min $(cat "$f/scaling_min_freq") max $(cat "$f/scaling_max_freq") kHz"
+        done
+        [ -r /sys/devices/system/cpu/intel_pstate/no_turbo ] && echo "intel no_turbo: $(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"
+        [ -r /sys/devices/system/cpu/cpufreq/boost ] && echo "cpufreq boost: $(cat /sys/devices/system/cpu/cpufreq/boost)"
+        true
+    } > "$DATA_DIR/meta.txt"
+fi
 echo "Measuring: $RUNS alternating rounds per config; keep the machine idle."
 echo
 
@@ -146,21 +175,37 @@ for cfg in "${CONFIG_ROWS[@]}"; do
             bin="$BIN_A"; style="$STYLE_A"
             [ "$side" = B ] && { bin="$BIN_B"; style="$STYLE_B"; }
             if ! run_bench "$style" "$bin" "$syn" "$err" "$it" "$bits" \
-                >> "$DATA/${side}_${tag}.txt"; then
+                > "$DATA/round.txt"; then
                 echo "error: bench (side $side, config '$cfg') failed; its output:" >&2
-                tail -5 "$DATA/${side}_${tag}.txt" >&2
+                tail -5 "$DATA/round.txt" >&2
                 exit 1
+            fi
+            cat "$DATA/round.txt" >> "$DATA/${side}_${tag}.txt"
+            if [ -n "$DATA_DIR" ]; then
+                ref="$REF_A"; commit="$COMMIT_A"
+                [ "$side" = B ] && { ref="$REF_B"; commit="$COMMIT_B"; }
+                awk -v pre="$side\t$ref\t$commit\t$run" -v OFS='\t' '
+                    $1 == "recover[ms]" && NF == 7 { print pre, $0 }
+                    # Wide row (positional CLI): metric bits impl0 impl1
+                    $1 == "recover[ms]" && NF != 7 {
+                        print pre, $1, $2, "'"$syn"'", "'"$err"'", 0, "GENERIC", $3
+                        if ($4 != "" && $4 != "-") print pre, $1, $2, "'"$syn"'", "'"$err"'", 0, "CLMUL", $4
+                    }' "$DATA/round.txt" >> "$DATA_DIR/rounds.tsv"
             fi
         done
     done
 done
 
+[ -n "$DATA_DIR" ] && printf 'config\tside\tref\tcommit\timplementation\tmin_ms\tmax_ms\tspread_pct\n' > "$DATA_DIR/summary.tsv"
 printf '%-18s %-4s %-22s %-22s\n' "config" "side" "impl0 min (spread%)" "impl1 min (spread%)"
 for cfg in "${CONFIG_ROWS[@]}"; do
     read -r syn err it bits <<< "$cfg"
     tag="s${syn}-e${err}-b${bits}"
     for side in A B; do
-        awk -v b="$bits" -v tag="$tag" -v side="$side" -v noise="$NOISE_PCT" '
+        ref="$REF_A"; commit="$COMMIT_A"
+        [ "$side" = B ] && { ref="$REF_B"; commit="$COMMIT_B"; }
+        awk -v b="$bits" -v tag="$tag" -v side="$side" -v noise="$NOISE_PCT" \
+            -v tsv="${DATA_DIR:+$DATA_DIR/summary.tsv}" -v ref="$ref" -v commit="$commit" '
             function add(c, v) {
                 if (v == "-") return
                 if (!seen[c] || v < min[c]) min[c] = v
@@ -175,6 +220,10 @@ for cfg in "${CONFIG_ROWS[@]}"; do
             # Wide row (positional CLI): metric bits impl0 impl1 ...
             $1 == "recover[ms]" && $2 == b && NF != 7 { add(1, $3); add(2, $4) }
             END {
+                if (tsv != "") {
+                    for (c = 1; c <= 2; c++) if (seen[c])
+                        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.2f\n", tag, side, ref, commit, (c == 1 ? "GENERIC" : "CLMUL"), min[c], max[c], 100 * (max[c] - min[c]) / min[c] >> tsv
+                }
                 printf "%-18s %-4s", tag, side
                 for (c = 1; c <= 2; c++) {
                     if (!seen[c]) { printf " %-22s", "-"; continue }
