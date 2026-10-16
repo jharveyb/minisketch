@@ -961,14 +961,32 @@ public:
         if (use_square_table) {
             size_t max_e = 2 * d - 2;
             first_even = (d & 1) ? d + 1 : d;
-            if (first_even <= max_e) {
-                size_t num_rows = (max_e - first_even) / 2 + 1;
-                rows.assign(num_rows * d, 0);
+            const size_t nrows = first_even <= max_e ? (max_e - first_even) / 2 + 1 : 0;
+            // Lazily-reducing fields store the rows directly in the
+            // column-block-major layout their reducer walks (all rows per
+            // block of 8 output columns: contiguous instead of one cache line
+            // per row 8*d bytes apart), with the d % 8 tail columns in a
+            // small row-major array; other fields row-major.
+            const size_t nb = d / 8, tl = d % 8;
+            if (F::LAZY_REDUCE) {
+                num_rows = nrows;
+                blk.assign(nb * nrows * 8, 0);
+                tail.assign(nrows * tl, 0);
+            } else {
+                rows.assign(nrows * d, 0);
             }
             std::vector<Elem> rem(d, 0);
             for (size_t j = 0; j < d; ++j) rem[j] = mod[j];
             for (size_t e = d; e <= max_e; ++e) {
-                if ((e & 1) == 0 && e >= first_even) std::copy(rem.begin(), rem.end(), rows.begin() + ((e - first_even) / 2) * d);
+                if ((e & 1) == 0 && e >= first_even) {
+                    const size_t r = (e - first_even) / 2;
+                    if (F::LAZY_REDUCE) {
+                        for (size_t b = 0; b < nb; ++b) std::copy(rem.begin() + 8 * b, rem.begin() + 8 * b + 8, blk.begin() + (b * nrows + r) * 8);
+                        std::copy(rem.begin() + 8 * nb, rem.end(), tail.begin() + r * tl);
+                    } else {
+                        std::copy(rem.begin(), rem.end(), rows.begin() + r * d);
+                    }
+                }
                 if (e == max_e) break;
                 Elem fold = rem[d - 1];
                 for (size_t j = d - 1; j > 0; --j) rem[j] = rem[j - 1];
@@ -981,23 +999,6 @@ public:
                         for (size_t j = 0; j < d; ++j) rem[j] ^= mul(mod[j]);
                     }
                 }
-            }
-            if (F::LAZY_REDUCE) {
-                // Column-block-major copy for the lazy reducer, which walks
-                // all rows per block of 8 output columns: contiguous instead
-                // of one cache line per row 8*d bytes apart. The d % 8 tail
-                // columns stay in a small row-major array.
-                num_rows = rows.size() / d;
-                size_t nb = d / 8, tl = d % 8;
-                blk.resize(nb * num_rows * 8);
-                tail.resize(num_rows * tl);
-                for (size_t r = 0; r < num_rows; ++r) {
-                    const Elem* row = rows.data() + r * d;
-                    for (size_t b = 0; b < nb; ++b) std::copy(row + 8 * b, row + 8 * b + 8, blk.begin() + (b * num_rows + r) * 8);
-                    std::copy(row + 8 * nb, row + d, tail.begin() + r * tl);
-                }
-                rows.clear();
-                rows.shrink_to_fit();
             }
         } else {
             size_t m = mod.size();
@@ -1828,7 +1829,10 @@ template<typename F>
 std::vector<typename F::Elem> BerlekampMasseyOdd(const std::vector<typename F::Elem>& osyn, size_t n_syn, size_t max_degree, const F& field) {
     typedef typename F::Elem Elem;
     CHECK_SAFE(n_syn <= 2 * osyn.size());
-    std::vector<typename F::Multiplier> table;
+    // Generic fields: one Multiplier table per processed syndrome. A deque
+    // grows without reallocation copies (the prefix length is not known in
+    // advance, and a vector's doubling would transiently hold both buffers).
+    std::deque<typename F::Multiplier> table;
     std::vector<Elem> syn, current, prev, tmp;
     current.reserve(n_syn / 2 + 1);
     prev.reserve(n_syn / 2 + 1);
