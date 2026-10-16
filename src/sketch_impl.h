@@ -1571,11 +1571,35 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
         }
         return true;
     }
+    const bool use_fft = TraceModFFTCapable(field) && L >= (TraceModCheapScalarMul<F>() ? BM_VERIFY_FFT_MIN_DEGREE : BM_VERIFY_FFT_MIN_DEGREE_TABLE);
+    if (!F::LAZY_REDUCE && !use_fft) {
+        // Table-based fields: one Multiplier per coefficient for the whole
+        // tail (instead of per block), applied coefficient by coefficient
+        // to L1-sized blocks of positions so each table stays hot.
+        std::vector<typename F::Multiplier> mul;
+        mul.reserve(L);
+        for (size_t a = 1; a <= L; ++a) mul.emplace_back(field, conn2[a]);
+        std::vector<Elem> acc;
+        const size_t B = 512;
+        for (size_t p = j0; p < j_end; p += B) {
+            const size_t b = std::min(B, j_end - p);
+            acc.assign(u.begin() + p, u.begin() + p + b);
+            for (size_t a = 1; a <= L; ++a) {
+                if (conn2[a] == 0) continue;
+                const Elem* src = u.data() + p - a;
+                for (size_t t = 0; t < b; ++t) acc[t] ^= mul[a - 1](src[t]);
+            }
+            for (size_t t = 0; t < b; ++t) {
+                if (acc[t] != 0) return false;
+            }
+        }
+        return true;
+    }
     // A block covers j in [p, p+B); its window u[p-L .. p+B) times conn^2
     // puts position j at product index j - p + L.
     int fft_m = 0;
     size_t block;
-    if (TraceModFFTCapable(field) && L >= (TraceModCheapScalarMul<F>() ? BM_VERIFY_FFT_MIN_DEGREE : BM_VERIFY_FFT_MIN_DEGREE_TABLE)) {
+    if (use_fft) {
         // The product (length B + 2L) must fit the transform without
         // wraparound; 2^fft_m >= 4(L+1) keeps at least half of it useful.
         fft_m = 1;
