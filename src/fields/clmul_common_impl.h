@@ -61,6 +61,7 @@ static inline Clmul128 Clmul00(ClmulPoly a, ClmulPoly b) { return _mm_clmulepi64
 static inline Clmul128 Clmul01(ClmulPoly a, ClmulPoly b) { return _mm_clmulepi64_si128(a, b, 0x01); }
 static inline Clmul128 ClmulXor(Clmul128 a, Clmul128 b) { return _mm_xor_si128(a, b); }
 static inline Clmul128 ClmulZero() { return _mm_setzero_si128(); }
+static inline Clmul128 ClmulFrom64(uint64_t x) { return _mm_cvtsi64_si128(x); }
 static inline Clmul128 ClmulOr(Clmul128 a, Clmul128 b) { return _mm_or_si128(a, b); }
 template<int N> static inline Clmul128 ClmulSrliEpi64(Clmul128 v) { return _mm_srli_epi64(v, N); }
 template<int N> static inline Clmul128 ClmulSlliEpi64(Clmul128 v) { return _mm_slli_epi64(v, N); }
@@ -92,6 +93,7 @@ static inline Clmul128 Clmul01(ClmulPoly a, ClmulPoly b) {
 }
 static inline Clmul128 ClmulXor(Clmul128 a, Clmul128 b) { return veorq_u64(a, b); }
 static inline Clmul128 ClmulZero() { return vdupq_n_u64(0); }
+static inline Clmul128 ClmulFrom64(uint64_t x) { return vsetq_lane_u64(x, vdupq_n_u64(0), 0); }
 static inline Clmul128 ClmulOr(Clmul128 a, Clmul128 b) { return vorrq_u64(a, b); }
 template<int N> static inline Clmul128 ClmulSrliEpi64(Clmul128 v) { return vshrq_n_u64(v, N); }
 template<int N> static inline Clmul128 ClmulSlliEpi64(Clmul128 v) { return vshlq_n_u64(v, N); }
@@ -223,6 +225,8 @@ public:
     static inline Wide WideZero() { return ClmulZero(); }
     static inline Wide MulWide(Elem a, Elem b) { return Clmul00(ClmulLoad64((uint64_t)a), ClmulLoad64((uint64_t)b)); }
     static inline Wide WideXor(Wide a, Wide b) { return ClmulXor(a, b); }
+    /** Embed an element (already reduced): Reduce(WideFrom(a)) == a. */
+    static inline Wide WideFrom(Elem a) { return ClmulFrom64((uint64_t)a); }
     inline Elem Reduce(Wide w) const { return RED(w); }
 
     /** Compute the square of a. */

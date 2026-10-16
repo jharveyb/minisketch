@@ -44,6 +44,7 @@ public:
     static inline Wide WideZero() { return 0; }
     inline Wide MulWide(Elem a, Elem b) const { return Mul(a, b); }
     static inline Wide WideXor(Wide a, Wide b) { return a ^ b; }
+    static inline Wide WideFrom(Elem a) { return a; }
     static inline Elem Reduce(Wide w) { return w; }
 
     /** Compute the square of a. */

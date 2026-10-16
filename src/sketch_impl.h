@@ -40,6 +40,11 @@
 #ifndef MINISKETCH_HGCD_ITER_CROSSOVER
 #define MINISKETCH_HGCD_ITER_CROSSOVER 24
 #endif
+/* Divisor length above which DivMod and GCD use lazy reduction (on fields
+ * that support it). */
+#ifndef MINISKETCH_DIVMOD_LAZY_MIN
+#define MINISKETCH_DIVMOD_LAZY_MIN 4
+#endif
 /* Berlekamp-Massey early termination: a tail verification is attempted after
  * a zero discrepancy once at least MIN_PREFIX syndromes are processed, the
  * processed count exceeds twice the LFSR length by GAP, and at least MIN_TAIL
@@ -84,6 +89,7 @@ static const size_t FAST_DIVMOD_CUTOFF = MINISKETCH_FAST_DIVMOD_CUTOFF;
 static const size_t HGCD_CUTOFF = MINISKETCH_HGCD_CUTOFF;
 static const size_t HGCD_ITER_CROSSOVER = MINISKETCH_HGCD_ITER_CROSSOVER;
 static const size_t BM_VERIFY_GAP = MINISKETCH_BM_VERIFY_GAP;
+static const size_t DIVMOD_LAZY_MIN = MINISKETCH_DIVMOD_LAZY_MIN;
 static const size_t BM_VERIFY_MIN_PREFIX = MINISKETCH_BM_VERIFY_MIN_PREFIX;
 static const size_t BM_VERIFY_MIN_TAIL = MINISKETCH_BM_VERIFY_MIN_TAIL;
 static const size_t BM_VERIFY_FFT_MIN_DEGREE = MINISKETCH_BM_VERIFY_FFT_MIN_DEGREE;
@@ -123,6 +129,25 @@ void DivMod(const std::vector<typename F::Elem>& mod, std::vector<typename F::El
     }
     CHECK_SAFE(val.back() != 0);
     div.resize(val.size() - mod.size() + 1);
+    if (F::LAZY_REDUCE && modsize > DIVMOD_LAZY_MIN) {
+        // Keep the dividend unreduced: each coefficient is reduced once,
+        // when it becomes the leading term (or at the end, for the
+        // remainder), instead of after every row update.
+        typedef typename F::Wide Wide;
+        const size_t dm = modsize - 1;
+        std::vector<Wide> w(val.size());
+        for (size_t i = 0; i < val.size(); ++i) w[i] = field.WideFrom(val[i]);
+        for (size_t top = val.size(); top-- > dm; ) {
+            auto term = field.Reduce(w[top]);
+            div[top - dm] = term;
+            if (term == 0) continue;
+            Wide* base = w.data() + top - dm;
+            for (size_t x = 0; x < dm; ++x) base[x] = field.WideXor(base[x], field.MulWide(term, mod[x]));
+        }
+        val.resize(dm);
+        for (size_t i = 0; i < dm; ++i) val[i] = field.Reduce(w[i]);
+        return;
+    }
     while (val.size() >= modsize) {
         auto term = val.back();
         div[val.size() - modsize] = term;
@@ -154,6 +179,43 @@ typename F::Elem MakeMonic(std::vector<typename F::Elem>& a, const F& field) {
 template<typename F>
 void GCD(std::vector<typename F::Elem>& a, std::vector<typename F::Elem>& b, const F& field) {
     if (a.size() < b.size()) std::swap(a, b);
+    if (F::LAZY_REDUCE && b.size() > DIVMOD_LAZY_MIN) {
+        // Euclid without per-step normalization: the divisor's inverse
+        // leading coefficient is folded into the quotient terms (one
+        // multiplication each) instead of rescaling the divisor to monic,
+        // and the dividend is reduced lazily as in DivMod. The result is
+        // made monic once at the end.
+        typedef typename F::Wide Wide;
+        std::vector<Wide> w;
+        bool divided = false;
+        while (b.size() > 1) {
+            divided = true;
+            const size_t db = b.size() - 1;
+            const auto inv = field.Inv(b.back());
+            w.resize(a.size());
+            for (size_t i = 0; i < a.size(); ++i) w[i] = field.WideFrom(a[i]);
+            for (size_t top = a.size(); top-- > db; ) {
+                auto lead = field.Reduce(w[top]);
+                if (lead == 0) continue;
+                auto term = field.Mul(lead, inv);
+                Wide* base = w.data() + top - db;
+                for (size_t x = 0; x < db; ++x) base[x] = field.WideXor(base[x], field.MulWide(term, b[x]));
+            }
+            a.resize(db);
+            for (size_t i = 0; i < db; ++i) a[i] = field.Reduce(w[i]);
+            while (!a.empty() && a.back() == 0) a.pop_back();
+            std::swap(a, b);
+        }
+        if (b.size() == 1) {
+            // A nonzero constant remainder: coprime.
+            a.assign(1, 1);
+            return;
+        }
+        // a is the last divisor (the unchanged input if there was none, as
+        // in the plain loop below, which only normalizes divisors).
+        if (divided) MakeMonic(a, field);
+        return;
+    }
     while (b.size() > 0) {
         if (b.size() == 1) {
             a.resize(1);
