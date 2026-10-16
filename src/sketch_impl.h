@@ -1756,7 +1756,15 @@ void CombineTowerTraces(const std::vector<std::vector<typename F::Elem>>& acc, s
  * One more squaring gives X_Bits = x^(2^Bits) mod poly, which equals x iff
  * poly divides x^(2^Bits) - x, i.e. iff poly is square-free with all roots in
  * the field: the return value. This decides factorizability exactly at the
- * root, replacing the deferred trace^2 + trace test. */
+ * root, replacing the deferred trace^2 + trace test.
+ *
+ * From degree MONT_ORBIT_MIN_DEGREE on fields with the FFT tier and a cheap
+ * Multiplier, the orbit runs in coset Montgomery form instead
+ * (MontgomeryOrbit), with the tower over GF(2^MONT_TOWER_BITS) in place of
+ * GF(2^8) (so betas differ). Given tree and carry, only traces[0] is
+ * returned and carry receives the relative traces from which the
+ * root-finding tree computes the deeper ones (MontCarry); without them all
+ * depths traces are returned. */
 template<typename F>
 bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem basis, size_t depths, const F& field, std::vector<std::vector<typename F::Elem>>& traces, std::vector<typename F::Elem>& betas, MontTree<F>* tree = nullptr, MontCarry<F>* carry = nullptr) {
     typedef typename F::Elem Elem;
@@ -2128,7 +2136,6 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             // Compute the polynomial (trace(x*randv) mod poly(x)) symbolically,
             // and put the result in `trace`.
             MINISKETCH_COZ_BEGIN("findroots-trace");
-            bool have_trace = false;
             const bool at_root = orbit && size_t(depth) < orbit->size() && poly.size() - 1 == orbit_degree;
             if (carry && carry->tree && !at_root && depth < CARRY_DEPTHS && !carry->t[depth / MONT_TOWER_BITS].empty()) {
                 // The relative trace T_l (l = depth / s) mod poly is carried
@@ -2142,9 +2149,6 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
                 } else {
                     MontTowerTrace(get_node_mc(), carry->t[l], poly.size() - 1, zk, trace, field, use_psum);
                 }
-                have_trace = true;
-            }
-            if (have_trace) {
             } else if (orbit && size_t(depth) < orbit->size() && ORBIT_NODE_FACTOR * orbit_degree <= (poly.size() - 1) * field.Bits()) {
                 // randv is the orbit's split parameter for this depth, so the
                 // trace mod the root polynomial reduces to the one mod poly
