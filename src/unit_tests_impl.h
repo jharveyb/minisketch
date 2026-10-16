@@ -948,7 +948,8 @@ void TestFindRootsMontgomery(const F& field, uint64_t lowmod, TestRand& rng) {
         return x;
     };
     struct Case { size_t degree; int planted; };
-    for (Case c : {Case{MONT_ORBIT_MIN_DEGREE, 0}, Case{MONT_ORBIT_MIN_DEGREE + 44, 0}, Case{MONT_ORBIT_MIN_DEGREE + 44, 3}, Case{MONT_ORBIT_MIN_DEGREE + 44, 4}, Case{MONT_ORBIT_MIN_DEGREE, 4}, Case{1100, 0}}) {
+    for (Case c : {Case{MONT_ORBIT_MIN_DEGREE, 0}, Case{256, 0}, Case{300, 0}, Case{300, 3}, Case{300, 4}, Case{256, 4}, Case{1100, 0}}) {
+        if (c.degree < MONT_ORBIT_MIN_DEGREE) continue;
         if (c.degree + 2 > (size_t(1) << std::min(bits, 20))) continue;
         int m = 1;
         while ((size_t(1) << m) < c.degree) ++m;

@@ -35,9 +35,18 @@ GF(2<sup>m</sup>) runs three stages (`src/sketch_impl.h`):
    Previously every node ran its own chain, ~`m·n²` in total (level `k`
    costing ~`m·n²/2^k`).
 
-The root chain is now the dominant cost of decode for n ≳ 64 (~50–60%),
-and on Haswell it runs at the PCLMULQDQ throughput limit; see "Remaining"
-below for why it is hard to shorten.
+   For roots of degree ≥ 224 on CLMUL/PMULL fields (the "coset Montgomery"
+   series below), the chain is m modular squarings at two size-N
+   transforms each (N = 2<sup>⌈log₂n⌉</sup>), the tree carries relative
+   traces down in Montgomery form (O(N log N) per level), and nodes of
+   degree ≥ 256 split by power sums and a half-size Berlekamp–Massey
+   instead of a gcd. The quadratic stages left are the decode
+   Berlekamp–Massey and the splits' BMs (~35% at 2048/1536), and the
+   gcds of the nodes below degree 256.
+
+For n ≳ 64 below that crossover the root chain is the dominant cost of
+decode (~50–60%), and on Haswell it runs at the PCLMULQDQ throughput
+limit; see "Remaining" below for why it is hard to shorten.
 
 A note on split retries: a failed trace split at degree `d` has probability
 ~2<sup>1−d</sup>, so retries are essentially free above degree ~8 and only
@@ -707,6 +716,194 @@ and several rounds for small fields. Exact verification is Ω(c log n)-ish
 * The **chain itself** is at the hardware throughput bound on Haswell.
   Shortening it needs a cheaper Frobenius than modular squaring; see
   above for why the obvious routes do not pay.
+
+## Implemented: coset Montgomery root finding and power-sum splits (2026-10, high fill)
+
+This series targets large, full sketches: capacity 1024–4096 with 50–100%
+of it in use, so root degrees d ≥ 256. Before it, root finding at those
+degrees cost (per decode) the root chain on the reciprocal (Barrett) FFT
+reducer, whose products need transforms of size ≥ 2d; node traces as
+divisions of the root's traces (~d·n per node, ~d² per tree level); own
+Bits−1-squaring traces for the nodes past the orbit depths; and a
+Euclidean gcd plus a long division per split (~1.5·d² in total). All
+items below are in `src/sketch_impl.h` unless noted.
+
+### Montgomery squaring on an FFT coset
+
+For the root f (monic, degree d), pick N = 2<sup>m</sup> ≥ d and a coset
+C = W<sub>m</sub> + η of the additive-FFT subspace, with vanishing
+polynomial Z<sub>C</sub>: in the Cantor basis
+Z<sub>C</sub>(x) = Σ<sub>j⊆m</sub> x<sup>2<sup>j</sup></sup> + const,
+degree N, formal derivative **Z<sub>C</sub>′ = 1**. Residues are held in
+Montgomery form r·Z<sub>C</sub> mod f, as a polynomial of degree < N given
+by its N values on C (`MontCoset`). The reduction of a product a is
+q = a/f mod Z<sub>C</sub> (pointwise on C) and r = (a + q·f)/Z<sub>C</sub>.
+On C both sides of h = a + q·f = r·Z<sub>C</sub> vanish. Differentiating,
+h′ = r′Z<sub>C</sub> + r gives **r(w) = a′(w) + q′(w)f(w) + q(w)f′(w)** on C,
+and for a square a = r² the term a′ = 2rr′ vanishes in characteristic 2.
+So a modular squaring is pointwise work plus the values of q′: one
+interpolation of q and one evaluation of its formal derivative, **two
+size-N transforms**. The reciprocal reducer needs about eight of size 2N
+for the same squaring. f must have no root on C (1/f there); the four
+cosets of W<sub>m</sub> in W<sub>m+2</sub> are tried in turn, with the old
+path as the fallback (exercised in the unit tests by planting roots on
+all four).
+
+The orbit (`MontgomeryOrbit`) runs the Bits squarings this way. It
+accumulates, on the coset, only the root trace Σ basis<sup>2<sup>i</sup></sup>X<sub>i</sub>
+(normalized once at the end) and the relative traces described below. The
+exact factorizability test X<sub>Bits</sub> = x becomes the vanishing of
+the reduced difference of two Montgomery forms. `AdditiveFFT` gained coset
+transforms: the block index is a twiddle offset, since a coset of
+W<sub>m</sub> is one block of a larger transform.
+
+### Novel-basis transforms
+
+The Cantor FFT is the Lin–Chung–Han butterfly transform with the
+monomial→novel basis conversion (repeated division by
+S<sup>j</sup>(x), S = x² + x) fused in as XOR cascades. Between the
+interpolation and the evaluation of a Montgomery squaring nothing needs
+monomial coefficients, and the formal derivative is cheap in the novel
+basis X<sub>k</sub> = Π<sub>j∈bits(k)</sub> S<sup>j</sup>: since
+(S<sup>j</sup>)′ = 1, X<sub>k</sub>′ = Σ<sub>j∈bits(k)</sub> X<sub>k−2<sup>j</sup></sub>,
+which is one XOR pass. `NovelFFT`/`NovelIFFT` are plain butterflies, 1.55× faster
+than the fused transform (2.2 vs 3.6 ns per butterfly on the devbox);
+conversions (`ToNovel`/`FromNovel`) happen only at the edges.
+
+### The Montgomery remainder tree
+
+The tree's nodes are factors of f, and a Montgomery form mod f is also one
+mod any factor with the same Z<sub>C</sub>. Shrinking to the child's size
+uses the halves C = C<sub>0</sub> ∪ C<sub>1</sub>:
+Z<sub>C</sub> = Z<sub>C0</sub>·Z<sub>C1</sub> and Z<sub>C0</sub> = 1 on
+C<sub>1</sub>. So the child's form on C<sub>1</sub> is v + q·g with
+q = v/g mod Z<sub>C0</sub>, which is **two half-size transforms per carried
+residue** (`MontCarryToFactor`). The tree carries relative traces this way
+instead of dividing the root's traces by every node.
+
+**Tower split parameters, GF(16).** With z generating GF(2<sup>s</sup>)
+and split parameters β<sub>sl+k</sub> = basis·ξ<sup>l</sup>·z<sup>k</sup>
+(ξ the field generator), the split trace of depth sl + k at any node is
+Tr<sub>GF(2<sup>s</sup>)/GF(2)</sub>(z<sup>k</sup>T<sub>l</sub>), with
+T<sub>l</sub> = Tr<sub>GF(2<sup>Bits</sup>)/GF(2<sup>s</sup>)</sub>(basis·ξ<sup>l</sup>x)
+mod g: **s − 1 squarings** of a carried trace. The orbit accumulates
+T<sub>l</sub> for free (every s-th step). Carrying one trace to both
+children costs two full-size transforms while one squaring costs two per
+node, so a smaller subfield, which needs more carried traces but fewer squarings, wins.
+s = 4 (`MONT_TOWER_BITS`, four traces for 16 depths) beats s = 8 by 5–8% on
+the i7 and the Pi, and s = 2 is in between. 16 carried depths remove the
+63-squaring own traces of the deep small nodes (`SmallTrace`), which were
+4–10% of decode at high fill.
+
+**Small nodes.** Below degree 16 (`SMALL_CARRY_MAX`) the traces are
+carried in normal form (division by the factor, coefficient-domain
+squarings: `TowerTraceSmall`), avoiding the per-node coset setup. Below
+degree 512 (`MONT_NORMALIZE_MIN`) a node's split trace is left in
+Montgomery form, a unit multiple mod g: the gcd with g, its only use, is
+the same, and the gcd's first division is cheaper than the reduction at
+those sizes.
+
+**Division on the coset.** After a split g = g<sub>0</sub>·g<sub>1</sub>,
+g<sub>1</sub>'s values are g/g<sub>0</sub> pointwise on the node's coset
+(`CosetDivide`). One evaluation, a batch inversion and one interpolation
+replace the long division. The quotient must come out monic of the right
+degree, which with deg g ≤ N proves divisibility. Both factors' values are
+also the halves their carries start from.
+
+### Power-sum splits: BM instead of the gcd
+
+The decoder passes the sketch's syndromes, the power sums
+Q<sub>k</sub> = Σ α<sup>k</sup> of the roots, to `FindRoots`. For a node g
+with split trace t (0 or 1 at every root), the roots A with t = 1 have
+power sums
+P<sub>k</sub> = Σ<sub>α∈A</sub> α<sup>k</sup> = Σ<sub>j<n</sub> t<sub>j</sub>Q<sub>j+k</sub>,
+a Hankel product (`PowerSumSplit`: for odd k, two half-size
+transposed-Karatsuba middle products split by the parity of j). Since
+t² = t on the roots, P<sub>2k</sub> = P<sub>k</sub>². These are syndromes,
+and `BerlekampMasseyOdd` recovers Π<sub>A</sub>(1 − αy) from the odd ones.
+An |A| ≈ n/2-root decode costs roughly half of the Euclidean gcd from
+degree n down to n/2 that it replaces: ≈0.45·n² against ≈1.09·n² ns
+measured at n = 1536 on the devbox. The other factor follows by coset division, whose
+exactness check rejects a wrong BM result (too few power sums, or power
+sums that do not belong to g). With 2M ≥ n power sums one of A and its
+complement has at most n/2 roots, so the complement (power sums
+Q<sub>k</sub> − P<sub>k</sub>) is tried next, then the gcd. Children
+inherit P and Q − P, so no node recomputes power sums. Nodes of degree
+≥ 256 in Montgomery form use it.
+
+### Field arithmetic (`src/fields/clmul_common_impl.h`)
+
+* CLMUL fields above 32 bits square by one carry-less product instead of
+  the linear-map tables (64-bit: 2.0 vs 3.4 ns x86-64, 3.7 vs 6.1 ns
+  Cortex-A76). At 32 bits they are even and the tables stay.
+* On ARM the 64-bit reduction folds the high word with shifts in
+  general registers, avoiding two dependent PMULLs with their NEON
+  transfers: Mul 4.0 → 3.0 ns, latency 10.0 → 6.4 ns on the A76, 4–10%
+  on decode. x86-64 keeps PCLMULQDQ (the shift form is slower there,
+  2× on Haswell).
+
+### Measured
+
+Pinned (`tools/bench_host.sh`: performance governor, turbo off, min = max:
+i7-4770 at 3.4 GHz, Pi 5 at 2.4 GHz), interleaved, min of 7 rounds,
+CLMUL/PMULL implementation unless noted; starting point: the 2026-10
+"Frobenius-structured BM, shared trace orbit, lazy reduction" series.
+
+RESULTS_TABLE
+
+Peak heap of one decode (instrumented `operator new`, 64-bit / 32-bit
+field) is lower everywhere: the d²/2 square table of the old orbit is
+gone, and the coset vectors are O(N) per tree level.
+
+MEMORY_TABLE
+
+Allocation counts per decode roughly doubled (per-node coset vectors).
+
+### Measured negative results in this series
+
+* **Two-coset Montgomery with 4 transforms.** Representing residues on two
+  cosets A and B, reducing pointwise on B and moving q (A→B) and r (B→A),
+  costs four size-N transforms per squaring. The derivative trick needs two.
+* **Normalizing all eight orbit buckets.** Each costs ~5 transforms; with
+  the carry only the root trace needs normal form (−20% orbit).
+* **Phased XOR cascades.** Every offset z of the division by
+  S<sup>q</sup> satisfies h/2 ≤ z < h. So the cascades out of a block's
+  top quarter never touch it, and two dependence-free passes replace the
+  sequential top-down division. Neutral end to end: the conversion is
+  bound by its ~13 XORs per element at N = 2048, not by the dependences.
+* **Half-gcd with shared transforms.** The 2×2 matrix-vector and matrix
+  products now transform each distinct operand once (8 instead of 12, 12
+  instead of 24 transforms), which made HGCD ~10% faster than the
+  quadratic loop at 3072 but still a tie at 1024–1536. The cutoff stays
+  at 4096.
+* **32-bit reduction in general registers.** On x86-64, +1% at high fill
+  and +5–7% at low fill on Haswell, but −8% on Zen 3. On the A76, −17%.
+  Not adopted.
+* **Blocked Berlekamp–Massey / Lehmer Euclid (analysis).** Simulating k
+  steps on short discrepancy windows and applying the 2×2 matrix with
+  Karatsuba products costs about the classical ~4 carry-less products per
+  coefficient-step at block sizes where the block simulation stays cheap.
+  It pays only in a full divide-and-conquer form with fast products, where
+  the half-gcd's constants apply.
+* **Peeling splits (analysis).** The gcd work telescopes:
+  Σ(n<sub>parent</sub>² − n<sub>gcd</sub>²) over the gcds computed. So
+  extracting large gcds (small complements by coset division) could cut it
+  by up to a third. But the needed indicator polynomials cost more
+  Montgomery products than that saves.
+
+### Remaining in this area
+
+* **Truncated (union-of-cosets) Montgomery transforms.** N is the next
+  power of two above the node degree: at 75% fill (768, 1536, ...) a
+  quarter of every transform is padding. A coset union
+  C<sub>1</sub> ∪ C<sub>2</sub> (1024 + 512) works with
+  Z = Z<sub>1</sub>Z<sub>2</sub>, Z′ = Z<sub>1</sub> + Z<sub>2</sub> known
+  pointwise, at the cost of truncated transforms.
+* **Divide-and-conquer Berlekamp–Massey.** BM is now the largest
+  quadratic stage at high fill: the decode BM plus the power-sum splits'
+  BMs, ~35% at 2048/1536.
+* **Allocation pooling** for the per-node coset vectors (2–4% estimated,
+  more on the Pi).
 
 ## Demoted ideas (investigated, not worth it)
 

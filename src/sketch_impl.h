@@ -93,7 +93,7 @@
  * reduction (MontgomeryOrbit) on fields with the FFT tier and a cheap
  * scalar Multiplier. */
 #ifndef MINISKETCH_MONT_ORBIT_MIN_DEGREE
-#define MINISKETCH_MONT_ORBIT_MIN_DEGREE 256
+#define MINISKETCH_MONT_ORBIT_MIN_DEGREE 224
 #endif
 /* Node degree up to which the root-finding tree carries the relative
  * traces in normal form instead of Montgomery form (MontCarry). */
