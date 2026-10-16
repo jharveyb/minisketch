@@ -97,8 +97,19 @@
 #endif
 /* Node degree up to which the root-finding tree carries the relative
  * traces in normal form instead of Montgomery form (MontCarry). */
+/* Subfield degree of the Montgomery tree's tower split parameters: each
+ * carried relative trace serves this many depths, at this many minus one
+ * modular squarings per node (1, 2, 4 or 8). */
+#ifndef MINISKETCH_MONT_TOWER_BITS
+#define MINISKETCH_MONT_TOWER_BITS 4
+#endif
 #ifndef MINISKETCH_SMALL_CARRY_MAX
 #define MINISKETCH_SMALL_CARRY_MAX 16
+#endif
+/* Node degree from which Montgomery-form split traces are normalized
+ * before the gcd (MontTowerTrace). */
+#ifndef MINISKETCH_MONT_NORMALIZE_MIN
+#define MINISKETCH_MONT_NORMALIZE_MIN 512
 #endif
 /* Lazy Karatsuba middle-product tail check (lazily-reducing fields): used
  * for LFSR lengths in [KARA_MIN_DEGREE, FFT_MIN_DEGREE), below which the
@@ -136,6 +147,7 @@ static const size_t ORBIT_EXTRA_DEPTHS = MINISKETCH_ORBIT_EXTRA_DEPTHS;
 static const size_t ORBIT_NODE_FACTOR = MINISKETCH_ORBIT_NODE_FACTOR;
 static const size_t MONT_ORBIT_MIN_DEGREE = MINISKETCH_MONT_ORBIT_MIN_DEGREE;
 static const size_t SMALL_CARRY_MAX = MINISKETCH_SMALL_CARRY_MAX;
+static const size_t MONT_NORMALIZE_MIN = MINISKETCH_MONT_NORMALIZE_MIN;
 
 /** Compute the remainder of a polynomial division of val by mod, putting the result in mod. */
 template<typename F>
@@ -733,6 +745,40 @@ void PolyMulStripped(const std::vector<typename F::Elem>& a, const std::vector<t
     PolyStrip(out);
 }
 
+/** Transforms of the operands of a 2x2 matrix-vector or matrix-matrix
+ * product, one per distinct operand, at a size fitting products of length
+ * max_prod (PolyDot2FromFFT then forms each sum of two products with one
+ * interpolation): 6 + 2 transforms instead of 4 * 3 for the matrix-vector
+ * product, 8 + 4 instead of 8 * 3 for the matrix product. Returns false
+ * (nothing computed) unless the FFT tier applies to every product. */
+template<typename F>
+bool PolyMat22FFT(const std::vector<const std::vector<typename F::Elem>*>& ops, size_t max_prod, const F& field, TraceModScratch<F>& scratch, std::vector<std::vector<typename F::Elem>>& tr) {
+    if (!TraceModFFTCapable(field) || !TraceModCheapScalarMul<F>()) return false;
+    if (max_prod < TRACEMOD_FFT_CUTOFF) return false;
+    for (auto o : ops) {
+        if (o->size() <= TRACEMOD_POLYMUL_CUTOFF) return false;
+    }
+    int m = 1;
+    while ((size_t(1) << m) < max_prod) ++m;
+    if (m > field.Bits()) return false;
+    tr.resize(ops.size());
+    for (size_t i = 0; i < ops.size(); ++i) scratch.fft.Prepare(*ops[i], m, field, tr[i]);
+    return true;
+}
+
+/** out = a0*b0 + a1*b1 from transforms (size 2^m), interpolated and
+ * stripped. */
+template<typename F>
+void PolyDot2FromFFT(const std::vector<typename F::Elem>& a0, const std::vector<typename F::Elem>& b0, const std::vector<typename F::Elem>& a1, const std::vector<typename F::Elem>& b1, std::vector<typename F::Elem>& out, const F& field, TraceModScratch<F>& scratch) {
+    const size_t n = a0.size();
+    int m = 0;
+    while ((size_t(1) << m) < n) ++m;
+    out.resize(n);
+    for (size_t i = 0; i < n; ++i) out[i] = field.Reduce(field.WideXor(field.MulWide(a0[i], b0[i]), field.MulWide(a1[i], b1[i])));
+    scratch.fft.IFFT(out, m, field);
+    PolyStrip(out);
+}
+
 /** Quotient and remainder for a not-necessarily-monic divisor: den must be
  * nonempty with den.back() != 0; num (stripped) becomes the stripped
  * remainder and q the quotient. Schoolbook; used for the single division
@@ -791,6 +837,16 @@ void PolyMat22Step(PolyMat22<F>& mat, const std::vector<typename F::Elem>& q, co
 template<typename F>
 void PolyMat22Apply(const PolyMat22<F>& mat, std::vector<typename F::Elem>& u, std::vector<typename F::Elem>& v, const F& field, TraceModScratch<F>& scratch) {
     std::vector<typename F::Elem> t00, t01, t10, t11;
+    if (!u.empty() && !v.empty() && !mat.e[0][0].empty() && !mat.e[0][1].empty() && !mat.e[1][0].empty() && !mat.e[1][1].empty()) {
+        size_t lm = std::max(std::max(mat.e[0][0].size(), mat.e[0][1].size()), std::max(mat.e[1][0].size(), mat.e[1][1].size()));
+        size_t max_prod = lm + std::max(u.size(), v.size()) - 1;
+        std::vector<std::vector<typename F::Elem>> tr;
+        if (PolyMat22FFT<F>({&mat.e[0][0], &mat.e[0][1], &mat.e[1][0], &mat.e[1][1], &u, &v}, max_prod, field, scratch, tr)) {
+            PolyDot2FromFFT(tr[0], tr[4], tr[1], tr[5], u, field, scratch);
+            PolyDot2FromFFT(tr[2], tr[4], tr[3], tr[5], v, field, scratch);
+            return;
+        }
+    }
     PolyMulStripped(mat.e[0][0], u, t00, field, scratch);
     PolyMulStripped(mat.e[0][1], v, t01, field, scratch);
     PolyMulStripped(mat.e[1][0], u, t10, field, scratch);
@@ -805,6 +861,22 @@ void PolyMat22Apply(const PolyMat22<F>& mat, std::vector<typename F::Elem>& u, s
 template<typename F>
 void PolyMat22Mul(PolyMat22<F>& out, const PolyMat22<F>& a, const PolyMat22<F>& b, const F& field, TraceModScratch<F>& scratch) {
     std::vector<typename F::Elem> tmp;
+    bool all = true;
+    size_t la = 0, lb = 0;
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            all = all && !a.e[i][j].empty() && !b.e[i][j].empty();
+            la = std::max(la, a.e[i][j].size());
+            lb = std::max(lb, b.e[i][j].size());
+        }
+    }
+    std::vector<std::vector<typename F::Elem>> tr;
+    if (all && PolyMat22FFT<F>({&a.e[0][0], &a.e[0][1], &a.e[1][0], &a.e[1][1], &b.e[0][0], &b.e[0][1], &b.e[1][0], &b.e[1][1]}, la + lb - 1, field, scratch, tr)) {
+        for (int i = 0; i < 2; ++i) {
+            for (int j = 0; j < 2; ++j) PolyDot2FromFFT(tr[2 * i], tr[4 + j], tr[2 * i + 1], tr[6 + j], out.e[i][j], field, scratch);
+        }
+        return;
+    }
     for (int i = 0; i < 2; ++i) {
         for (int j = 0; j < 2; ++j) {
             PolyMulStripped(a.e[i][0], b.e[0][j], out.e[i][j], field, scratch);
@@ -1197,26 +1269,31 @@ public:
     }
 };
 
-/** An element generating the subfield GF(2^8) of GF(2^Bits) (8 | Bits):
- * the relative trace sum_l y^(2^(8l)) of y = x, x^2, ... maps into
- * GF(2^8); the first image outside GF(16) (w^16 != w) has degree 8 over
- * GF(2), so its powers 1..w^7 are a GF(2)-basis of GF(2^8). */
+/** An element generating the subfield GF(2^sub) of GF(2^Bits) (sub a
+ * power of two dividing Bits): the relative trace sum_l y^(2^(sub*l)) of
+ * y = x, x^2, ... maps into GF(2^sub); the first image outside the largest
+ * proper subfield GF(2^(sub/2)) has degree sub over GF(2), so its powers
+ * 1..w^(sub-1) are a GF(2)-basis of GF(2^sub). */
 template<typename F>
-typename F::Elem SubfieldGenerator8(const F& field) {
+typename F::Elem SubfieldGenerator(const F& field, int sub) {
     typedef typename F::Elem Elem;
+    if (sub == 1) return 1;
     Elem y = 1;
     while (true) {
         y = field.Mul2(y);
         Elem w = 0, t = y;
-        for (int l = 0; l < field.Bits() / 8; ++l) {
+        for (int l = 0; l < field.Bits() / sub; ++l) {
             w ^= t;
-            for (int s = 0; s < 8; ++s) t = field.Sqr(t);
+            for (int s = 0; s < sub; ++s) t = field.Sqr(t);
         }
-        Elem w16 = w;
-        for (int s = 0; s < 4; ++s) w16 = field.Sqr(w16);
-        if (w16 != w) return w;
+        Elem wh = w;
+        for (int s = 0; s < sub / 2; ++s) wh = field.Sqr(wh);
+        if (wh != w) return w;
     }
 }
+
+template<typename F>
+typename F::Elem SubfieldGenerator8(const F& field) { return SubfieldGenerator(field, 8); }
 
 /* ---------- Montgomery arithmetic on additive-FFT cosets ----------
  *
@@ -1368,25 +1445,40 @@ public:
         out.assign(v.begin(), v.begin() + d);
         PolyStrip(out);
     }
+
+    /** Values v to the coefficients (degree < 2^m, stripped) of the same
+     *  polynomial, without reduction: v is destroyed. */
+    void ToCoefficients(std::vector<Elem>& v, std::vector<Elem>& out) {
+        fft.NovelIFFT(v, m, field, block);
+        fft.FromNovel(v, m);
+        out.swap(v);
+        PolyStrip(out);
+    }
 };
 
 /** Shared state of the Montgomery root-finding tree: the transform tables
- * and the tower scheme's GF(2^8) generator z (see ComputeTraceOrbit). */
+ * and the generator z of the tower subfield GF(2^MONT_TOWER_BITS). */
 template<typename F>
 struct MontTree {
     AdditiveFFT<F> fft;
     typename F::Elem z;
 };
 
-/** Number of relative traces carried down the root-finding tree. */
-static const int CARRY_TRACES = 2;
+/** Tower subfield GF(2^MONT_TOWER_BITS) of the Montgomery root-finding
+ * tree's split parameters, the number of split depths it carries relative
+ * traces for, and the number of those traces. */
+static const int MONT_TOWER_BITS = MINISKETCH_MONT_TOWER_BITS;
+static const int CARRY_DEPTHS = 16;
+static const int CARRY_TRACES = CARRY_DEPTHS / MONT_TOWER_BITS;
 
-/** The relative traces T_l = Tr_(GF(2^Bits)/GF(2^8))(basis * xi^l * x)
- * (xi = Mul2's generator, l < CARRY_TRACES) modulo a node polynomial g of
- * the root-finding tree. With the tower split parameters
- * beta_(8l+k) = basis * xi^l * z^k, the split trace of depth 8l + k at the
- * node is Tr(beta_(8l+k) * x) = Tr_(GF(2^8)/GF(2))(z^k * T_l) =
- * sum_(r<8) (z^k T_l)^(2^r) mod g: seven modular squarings. Large nodes
+/** The relative traces T_l = Tr_(GF(2^Bits)/GF(2^s))(basis * xi^l * x)
+ * (s = MONT_TOWER_BITS, xi = Mul2's generator, l < CARRY_TRACES) modulo a
+ * node polynomial g of the root-finding tree. With the tower split
+ * parameters beta_(sl+k) = basis * xi^l * z^k (z generating GF(2^s)), the
+ * split trace of depth sl + k at the node is
+ * Tr(beta_(sl+k) * x) = Tr_(GF(2^s)/GF(2))(z^k * T_l) =
+ * sum_(r<s) (z^k T_l)^(2^r) mod g: s - 1 modular squarings. A smaller s
+ * trades squarings for more carried traces. Large nodes
  * hold the T_l in Montgomery form on a coset (see above); nodes of degree
  * at most SMALL_CARRY_MAX hold them in normal form (coefficients), carried
  * to factors by plain division. T_l is empty once no descendant needs
@@ -1446,8 +1538,8 @@ void MontCarryToFactor(const MontCarry<F>& parent, const std::vector<typename F:
     }
 }
 
-/** out = sum_(r<8) (zk * t)^(2^r) mod g for t of degree < deg g, all in
- * coefficient form (for small g). */
+/** out = sum_(r<MONT_TOWER_BITS) (zk * t)^(2^r) mod g for t of degree
+ * < deg g, all in coefficient form (for small g). */
 template<typename F>
 void TowerTraceSmall(const std::vector<typename F::Elem>& g, const std::vector<typename F::Elem>& t, typename F::Elem zk, std::vector<typename F::Elem>& out, const F& field) {
     typedef typename F::Elem Elem;
@@ -1455,7 +1547,7 @@ void TowerTraceSmall(const std::vector<typename F::Elem>& g, const std::vector<t
     std::vector<Elem> y(n, 0), sq(2 * n - 1);
     for (size_t j = 0; j < t.size(); ++j) y[j] = field.Mul(zk, t[j]);
     out = y;
-    for (int r = 1; r < 8; ++r) {
+    for (int r = 1; r < MONT_TOWER_BITS; ++r) {
         for (size_t j = 0; j < n; ++j) {
             sq[2 * j] = field.Sqr(y[j]);
             if (j + 1 < n) sq[2 * j + 1] = 0;
@@ -1474,18 +1566,27 @@ void TowerTraceSmall(const std::vector<typename F::Elem>& g, const std::vector<t
     PolyStrip(out);
 }
 
-/** out = sum_(r<8) (zk * T)^(2^r) mod g from T's Montgomery values v on
- * mc's coset (mc's modulus g). */
+/** out = sum_(r<MONT_TOWER_BITS) (zk * T)^(2^r) mod g from T's Montgomery values v on
+ * mc's coset (mc's modulus g). Below degree MONT_NORMALIZE_MIN, out is
+ * instead the Montgomery form itself (degree < 2^m, congruent to the trace
+ * times Z_C, a unit mod g): its gcd with g, the only use of a split
+ * trace, is the same, and the extra length costs the gcd's first division
+ * less than the reduction would at those sizes. force_normal always
+ * normalizes. */
 template<typename F>
-void MontTowerTrace(MontCoset<F>& mc, const std::vector<typename F::Elem>& v, size_t deg_g, typename F::Elem zk, std::vector<typename F::Elem>& out, const F& field) {
+void MontTowerTrace(MontCoset<F>& mc, const std::vector<typename F::Elem>& v, size_t deg_g, typename F::Elem zk, std::vector<typename F::Elem>& out, const F& field, bool force_normal = false) {
     typedef typename F::Elem Elem;
     std::vector<Elem> y(mc.n), acc(mc.n);
     for (size_t j = 0; j < mc.n; ++j) acc[j] = y[j] = field.Mul(zk, v[j]);
-    for (int r = 1; r < 8; ++r) {
+    for (int r = 1; r < MONT_TOWER_BITS; ++r) {
         mc.Square(y);
         for (size_t j = 0; j < mc.n; ++j) acc[j] ^= y[j];
     }
-    mc.ToNormal(acc, deg_g, out);
+    if (force_normal || deg_g >= MONT_NORMALIZE_MIN) {
+        mc.ToNormal(acc, deg_g, out);
+    } else {
+        mc.ToCoefficients(acc, out);
+    }
 }
 
 /** Frobenius orbit sums by Montgomery reduction on a coset (see above).
@@ -1493,7 +1594,7 @@ void MontTowerTrace(MontCoset<F>& mc, const std::vector<typename F::Elem>& v, si
  * With X_i = x^(2^i) mod f, accumulates (on the coset, in Montgomery form)
  * while x is squared Bits times the root's split trace
  * trace0 = Tr(basis * x) = sum_i basis^(2^i) * X_i, returned in normal
- * form, and the relative traces T_l = sum_(i = 0 mod 8) (basis * xi^l)^(2^i)
+ * form, and the relative traces T_l = sum_(i = 0 mod s) (basis * xi^l)^(2^i)
  * * X_i (see MontCarry), returned in carry (whose tree is left to the caller)
  * with fft as its transform engine, which this function extends. Deeper
  * split traces come from the T_l (MontTowerTrace). X_Bits == x (full
@@ -1539,7 +1640,7 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
     const std::vector<Elem> ra0 = ra;
 
     // Accumulators of trace0 = sum_i basis^(2^i) X_i and of the relative
-    // traces T_l = sum_(i = 0 mod 8) (basis * xi^l)^(2^i) X_i.
+    // traces T_l = sum_(i = 0 mod s) (basis * xi^l)^(2^i) X_i.
     std::vector<Wide> wide_all(n, field.WideZero()), wide_t(CARRY_TRACES * n, field.WideZero());
     Elem bcoef = basis, tcoef[CARRY_TRACES];
     tcoef[0] = basis;
@@ -1547,7 +1648,7 @@ int MontgomeryOrbit(const std::vector<typename F::Elem>& poly, typename F::Elem 
     for (int i = 0; i < bits; ++i) {
         Wide* w = wide_all.data();
         for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(bcoef, ra[j]));
-        if (i % 8 == 0) {
+        if (i % MONT_TOWER_BITS == 0) {
             for (int l = 0; l < CARRY_TRACES; ++l) {
                 w = wide_t.data() + l * n;
                 for (size_t j = 0; j < n; ++j) w[j] = field.WideXor(w[j], field.MulWide(tcoef[l], ra[j]));
@@ -1671,7 +1772,20 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
         }
     }
     std::vector<std::vector<Elem>> acc;
-    if (tower && d >= MONT_ORBIT_MIN_DEGREE && TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) {
+    if (tower && bits % MONT_TOWER_BITS == 0 && d >= MONT_ORBIT_MIN_DEGREE && TraceModFFTCapable(field) && TraceModCheapScalarMul<F>()) {
+        // The Montgomery tree's tower: beta_(sl+k) = basis * xi^l * z^k
+        // with z generating GF(2^s), s = MONT_TOWER_BITS.
+        std::vector<Elem> mbetas(bits);
+        const Elem mz = SubfieldGenerator(field, MONT_TOWER_BITS);
+        Elem xl = basis;
+        for (int l = 0; l < bits / MONT_TOWER_BITS; ++l) {
+            Elem v = xl;
+            for (int j = 0; j < MONT_TOWER_BITS; ++j) {
+                mbetas[MONT_TOWER_BITS * l + j] = v;
+                v = field.Mul(v, mz);
+            }
+            xl = field.Mul2(xl);
+        }
         MontTree<F> local_tree;
         MontCarry<F> local_carry;
         MontTree<F>& mtree = (tree && carry) ? *tree : local_tree;
@@ -1679,7 +1793,8 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
         int res = MontgomeryOrbit(poly, basis, field, traces[0], mtree.fft, mcarry);
         if (res == 0) return false;
         if (res == 1) {
-            mtree.z = z;
+            betas.swap(mbetas);
+            mtree.z = mz;
             mcarry.tree = &mtree;
             if (tree && carry) {
                 // The root-finding tree computes deeper traces from the carry.
@@ -1689,10 +1804,11 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
                 bool ok = mc.SetModulus(poly, &mcarry.ga);
                 CHECK_SAFE(ok);
                 (void)ok;
-                Elem zk = 1;
                 for (size_t k = 1; k < depths; ++k) {
-                    zk = field.Mul(zk, z);
-                    MontTowerTrace(mc, mcarry.t[0], d, zk, traces[k], field);
+                    CHECK_SAFE(k < size_t(CARRY_DEPTHS));
+                    Elem zk = 1;
+                    for (size_t r = 0; r < k % MONT_TOWER_BITS; ++r) zk = field.Mul(zk, mz);
+                    MontTowerTrace(mc, mcarry.t[k / MONT_TOWER_BITS], d, zk, traces[k], field, true);
                 }
             }
             return true;
@@ -1880,16 +1996,17 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
             MINISKETCH_COZ_BEGIN("findroots-trace");
             bool have_trace = false;
             const bool at_root = orbit && size_t(depth) < orbit->size() && poly.size() - 1 == orbit_degree;
-            if (carry && carry->tree && !at_root && depth < 8 * CARRY_TRACES && !carry->t[depth / 8].empty()) {
-                // The relative trace T_l (l = depth / 8) mod poly is carried
+            if (carry && carry->tree && !at_root && depth < CARRY_DEPTHS && !carry->t[depth / MONT_TOWER_BITS].empty()) {
+                // The relative trace T_l (l = depth / s) mod poly is carried
                 // down the tree; the depth's split parameter is
-                // basis * xi^l * z^(depth % 8) (tower scheme).
+                // basis * xi^l * z^(depth % s) (tower scheme).
+                const int l = depth / MONT_TOWER_BITS;
                 typename F::Elem zk = 1;
-                for (int k = 0; k < depth % 8; ++k) zk = field.Mul(zk, carry->tree->z);
+                for (int k = 0; k < depth % MONT_TOWER_BITS; ++k) zk = field.Mul(zk, carry->tree->z);
                 if (carry->normal) {
-                    TowerTraceSmall(poly, carry->t[depth / 8], zk, trace, field);
+                    TowerTraceSmall(poly, carry->t[l], zk, trace, field);
                 } else {
-                    MontTowerTrace(get_node_mc(), carry->t[depth / 8], poly.size() - 1, zk, trace, field);
+                    MontTowerTrace(get_node_mc(), carry->t[l], poly.size() - 1, zk, trace, field);
                 }
                 have_trace = true;
             }
@@ -1995,8 +2112,8 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
     std::swap(poly, trace);
     // Carry the relative traces still needed to both factors.
     MontCarry<F> carry_poly, carry_tmp;
-    if (carry && carry->tree && depth < 8 * CARRY_TRACES) {
-        const int l_min = depth / 8;
+    if (carry && carry->tree && depth < CARRY_DEPTHS) {
+        const int l_min = depth / MONT_TOWER_BITS;
         std::vector<typename F::Elem> node_t[CARRY_TRACES];
         bool have_node_t = carry->normal;
         auto to_factor = [&](const std::vector<typename F::Elem>& g, MontCarry<F>& out) {
