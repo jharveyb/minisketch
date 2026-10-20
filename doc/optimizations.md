@@ -436,6 +436,11 @@ Berlekamp-Massey pass over all 2c syndromes and in per-node trace chains.
 Everything below is exact: decode returns the same result, including the
 same failure behaviour, as before.
 
+Gentler explanations of the same ideas: [decode_explained.md](decode_explained.md)
+(undergraduate discrete math), [decode_coding_theory.md](decode_coding_theory.md)
+(coding theory) and [math_decode.md](math_decode.md) (in the style of
+[math.md](math.md)).
+
 ### Frobenius-structured Berlekamp-Massey
 
 The syndromes are power sums in characteristic 2, so s<sub>2k</sub> =

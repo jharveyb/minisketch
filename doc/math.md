@@ -113,5 +113,9 @@ Say that we're trying to find the inverses of the roots of *L = 1 + l<sub>1</sub
 
 In other words, we can find the inverses of the roots of *L* by instead factoring the polynomial with the coefficients of *L* in reverse order.
 
+**More optimizations**
+
+Further decoding speedups (skipping half of the Berlekamp-Massey steps, stopping it early, sharing one trace computation across the whole root search) are described in the same style in [math_decode.md](math_decode.md).
+
 * <a name="myfootnote1">[1]</a> For those familiar with coding theory: PinSketch communicates a set difference by encoding the set members as errors in a binary [BCH](https://en.wikipedia.org/wiki/BCH_code) codeword 2<sup>bits</sup> in size and sends the syndromes.
   The linearity of the syndromes provides all the properties needed for a sketch. Sketch decoding is simply finding the error locations. Decode is much faster than an ordinary BCH decoder for such a large codeword because the need to take a discrete log is avoided by storing the set in the roots directly instead of in an exponent (logically permuting the bits of the codeword).
