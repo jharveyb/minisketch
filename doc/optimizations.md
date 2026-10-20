@@ -874,6 +874,13 @@ CLMUL/PMULL implementation unless noted; starting point: the 2026-10
 | generic 1024/768 (64-, 32-bit) | 1.01–1.02× | 1.05× |
 | 1024/1100, 4096/4200 (over capacity: fail) | 3.22×, 2.25× | 3.39×, 2.35× |
 
+These builds are CMake Release (-O3). The branch-progression harness
+(`tools/bench_ab.sh`, -g -O2) agrees after commit "write the 64-bit shift
+reduction without loops": at -O2, GCC had left the ARM reduction's
+constant-trip loops rolled (Mul 15.5 instead of 3.1 ns on the A76). With
+the fix, general_math_speedup → this series at -O2 measured 2.3–2.5× at
+1024–4096 full capacity on both boxes, and 1.5–1.9× for the 32-bit field.
+
 The 32-bit field gains less: its chain is half as long, so the quadratic
 stages (BM and the splits' BMs, the small nodes' gcds), which this series
 changes least, are a larger share. Raw data:
