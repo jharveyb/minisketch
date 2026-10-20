@@ -71,7 +71,9 @@
           # not a second toolchain. Reads build/compile_commands.json.
           pkgs.mull.llvmPackages.clang-tools
           coz
-          python3
+          # One python3 for coz_summary.py and doc/plot_bench.py (pandas,
+          # matplotlib; see doc/pyproject.toml).
+          (python3.withPackages (ps: [ ps.pandas ps.matplotlib ]))
 
           # Debugging / profiling / benchmarking (tools/bench_ab.sh et al.)
           gdb
