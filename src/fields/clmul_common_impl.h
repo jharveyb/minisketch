@@ -102,6 +102,21 @@ template<int N> static inline Clmul128 ClmulSrliBytes(Clmul128 v) {
 }
 #endif
 
+#if defined(MINISKETCH_CLMUL_ARM)
+/** v * M mod 2^64 for a carry-less multiplier M < 2^8, by shifts. */
+template<uint64_t M> static inline uint64_t ShiftMul8(uint64_t v)
+{
+    return ((M & 1) ? v : 0) ^ ((M & 2) ? v << 1 : 0) ^ ((M & 4) ? v << 2 : 0) ^ ((M & 8) ? v << 3 : 0) ^
+           ((M & 16) ? v << 4 : 0) ^ ((M & 32) ? v << 5 : 0) ^ ((M & 64) ? v << 6 : 0) ^ ((M & 128) ? v << 7 : 0);
+}
+/** The bits of v * M (carry-less, M < 2^8) above 2^64. */
+template<uint64_t M> static inline uint64_t FoldOverflow(uint64_t v)
+{
+    return ((M & 2) ? v >> 63 : 0) ^ ((M & 4) ? v >> 62 : 0) ^ ((M & 8) ? v >> 61 : 0) ^ ((M & 16) ? v >> 60 : 0) ^
+           ((M & 32) ? v >> 59 : 0) ^ ((M & 64) ? v >> 58 : 0) ^ ((M & 128) ? v >> 57 : 0);
+}
+#endif
+
 /** Reduce an unreduced carry-less product (degree <= 2*BITS-2) modulo
  *  x^BITS + MOD. The reduction is GF(2)-linear in its input, so it also
  *  reduces XOR-sums of such products (see GenField::Reduce). */
@@ -116,18 +131,11 @@ template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I ReduceWithClMul(Clmul
         // Cortex-A76 this beats the two dependent PMULLs with their
         // NEON/general-register transfers (Mul 3.0 vs 4.0 ns throughput,
         // 6.4 vs 10.0 ns latency); on x86-64 the PCLMULQDQ form is faster.
+        // Written out without loops: GCC only unrolls the constant-trip
+        // loops at -O3, and at -O2 they made Mul 5x slower.
         const uint64_t lo = vgetq_lane_u64(product, 0), hi = vgetq_lane_u64(product, 1);
-        uint64_t r = lo, o = 0;
-        for (int k = 0; k < 8; ++k) {
-            if ((uint64_t(MOD) >> k) & 1) {
-                r ^= hi << k;
-                if (k) o ^= hi >> (64 - k);
-            }
-        }
-        for (int k = 0; k < 8; ++k) {
-            if ((uint64_t(MOD) >> k) & 1) r ^= o << k;
-        }
-        return I(r);
+        const uint64_t o = FoldOverflow<uint64_t(MOD)>(hi);
+        return I(lo ^ ShiftMul8<uint64_t(MOD)>(hi) ^ ShiftMul8<uint64_t(MOD)>(o));
     }
 #endif
     const ClmulPoly MOD128 = ClmulLoad64(MOD);
