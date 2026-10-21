@@ -1,7 +1,9 @@
 # How the faster decoder works
 
 An explanation of the 2026-10 decode optimizations for a reader with
-undergraduate discrete math. [decode_coding_theory.md](decode_coding_theory.md)
+undergraduate discrete math. Optimizations 1–6 speed up decoding in general;
+7–10 are the root-finding techniques for large, fairly full sketches (root
+degree in the hundreds or more). [decode_coding_theory.md](decode_coding_theory.md)
 covers the same ideas from the coding-theory side, and
 [math_decode.md](math_decode.md) in the style of [math.md](math.md).
 
@@ -92,7 +94,8 @@ recursion tree.
 **The observation:** every node's polynomial g divides the root polynomial f,
 and reducing mod f then mod g is the same as reducing mod g. So the 63
 squarings are computed once at the root, and each node just takes one
-remainder. As a bonus, x^(2⁶⁴) ≡ x mod f holds iff f has all its roots in the
+remainder. (For large polynomials, Optimizations 7–10 below replace these
+remainders and most of the gcds.) As a bonus, x^(2⁶⁴) ≡ x mod f holds iff f has all its roots in the
 field and none repeated. That's the field's version of Fermat's little
 theorem, so one extra squaring tells immediately whether decoding can succeed.
 
@@ -127,10 +130,134 @@ reduce at the end, not after each term.
 - **Dot-product long division.** Each quotient and remainder coefficient
   becomes one accumulated sum, which pairs with lazy reduction.
 
+## Root finding for large sketches
+
+When the sketch holds hundreds or thousands of elements, the root polynomial
+f(x) = (x − m₁)(x − m₂)⋯(x − mₙ) (L with its coefficients reversed, so its
+roots are the elements themselves) has degree d = n in the hundreds or
+thousands. Then the 63 squarings mod f, the remainders at every node and the
+gcds dominate decoding. The next four optimizations attack those.
+
+## Optimization 7: squaring mod f using point values ("Montgomery on a coset")
+
+**Coefficients vs. point values.** A polynomial of degree < N can be stored
+either as its coefficients or as its values at N points. In point-value
+form, multiplying two polynomials is just multiplying the values pointwise.
+An FFT converts between the two forms in O(N log N).
+
+The difficulty is reducing mod f, which is natural in coefficient form. We
+borrow an idea from integer arithmetic: **Montgomery multiplication**. For
+integers, Montgomery reduces mod p by dividing by R = 2ᵏ, because dividing
+by a power of two is easy. Here we use a polynomial R that is easy in
+point-value form:
+
+- **The choice of R.** Let C be the set of N evaluation points. Let
+  R = Z_C(x) = ∏_{w∈C} (x − w), so R is zero at every point of C.
+- **Step 1: find the correction q.** For a product a = r², we want a
+  polynomial q such that a + q·f is divisible by R. That means
+  q ≡ a/f mod R. "Mod R" is the same as "the values on C", so we get q by
+  pointwise division: q(w) = a(w)/f(w) at each point w.
+- **Step 2: divide by R.** The result is r_new = (a + q·f)/R. Its values on
+  C would be 0/0, since R vanishes there.
+
+**The trick to resolve 0/0.** Write h = a + q·f = r_new·R and
+differentiate both sides:
+
+  h′ = r_new′·R + r_new·R′.
+
+At a point w of C, R(w) = 0, so h′(w) = r_new(w)·R′(w). Now two facts about
+characteristic 2 help:
+
+- **R′ = 1.** C is chosen as an affine subspace (bit strings forming a
+  shifted "subspace" under XOR). Then R has the form x^(2^m) + … + x + c,
+  with only power-of-two exponents. The derivative of x^(2^j) is
+  2^j·x^(2^j − 1), and 2^j = 0 in characteristic 2 for j ≥ 1. Only the x
+  term survives, so R′ = 1.
+- **(r²)′ = 2rr′ = 0.** So a′ = 0, and h′ = q′·f + q·f′.
+
+Putting these together:
+
+  r_new(w) = q′(w)·f(w) + q(w)·f′(w).
+
+Everything there is pointwise except q′. Getting q′ costs one inverse FFT
+(to get q's coefficients), a cheap differentiation, and one FFT back. So one
+modular squaring costs **2 FFTs of size N ≈ d**. The previous method needed
+about 8 FFTs of size 2d.
+
+The transforms got cheaper too:
+
+- **Cheaper derivative.** The FFT works internally in a special "novel"
+  polynomial basis, and in that basis the derivative is just an XOR pass.
+- **No basis conversion.** We never convert back to ordinary coefficients
+  in the middle of the squaring chain.
+
+## Optimization 8: pass a half-computed trace down the tree
+
+Each child polynomial g in the split tree divides f. So anything reduced
+mod f, reduced further mod g, is correct mod g.
+
+We exploit a tower of subfields, as in Optimization 4, but with the smaller
+subfield GF(16) inside GF(2⁶⁴). Instead of the full trace, we compute
+T(x) = Tr₆₄→₁₆(βx), a "partial trace" whose values lie in GF(16). One T
+gives the split polynomial for 4 tree levels, at 3 squarings each, instead
+of 63 squarings for a fresh trace. A few such T (for different β) cover all
+the levels a tree of degree d actually reaches.
+
+The tree hands each T (in point-value form) from parent to child. To shrink
+the point set as the polynomials shrink:
+
+- Split C into halves C₀ and C₁. Then Z_C = Z_C₀ · Z_C₁, and Z_C₀ = 1 at
+  every point of C₁.
+- Converting to the child's smaller representation is therefore one more
+  Montgomery step, costing 2 half-size FFTs.
+
+## Optimization 9: division by pointwise division
+
+After a split g = g₁·g₂, we know g₁ and want g₂. Instead of long division,
+compute g₂(w) = g(w)/g₁(w) at each point and interpolate back to
+coefficients.
+
+If the answer comes out monic (leading coefficient 1) with the right
+degree, it really divides g. That check is also what makes Optimization 10
+safe.
+
+## Optimization 10: replace each gcd with a smaller decode
+
+Let A be the set of roots where t = 1, for the node's split polynomial t.
+Its power sums are
+
+  P_k = Σ_{α∈A} αᵏ = Σ_α t(α)·αᵏ.
+
+Write t(x) = Σⱼ tⱼxʲ. Expanding gives
+
+  P_k = Σⱼ tⱼ·Q_{j+k},
+
+where Q is the list of power sums of all of the node's roots. **So the
+sketch of the subset A can be computed directly from the sketch of the
+whole set.** At the root, Q is literally the sketch we were handed.
+
+There's a bonus. Since t(α) ∈ {0, 1}, we have t(α)² = t(α), and so
+P₂ₖ = Pₖ². That is the same "even terms are squares of earlier terms"
+structure that real sketches have (Optimization 1). So P is a genuine
+sketch of A, and we decode it with the same fast BM to get A's polynomial
+directly.
+
+Why this is faster:
+
+- A has about n/2 roots, so its BM costs about a quarter of a full-size BM.
+- That's about half of what Euclid's gcd costs on the degree-n polynomial.
+
+Safety: if BM had too few terms, or produced something bogus, the
+divisibility check from Optimization 9 catches it. We then retry on the
+complement (power sums Q − P), and finally fall back to the gcd. Children
+inherit P and Q − P, so nobody recomputes power sums.
+
 ## Everything is exact
 
 Every change returns the same output as the old decoder for every input,
 including garbage and adversarial sketches. Only the amount of work changed.
+(Optimizations 7–10 use different split parameters, so they return the same
+set of elements, possibly in a different order.)
 
 See [optimizations.md](optimizations.md) for the derivations, the measurements
 on an i7-4770 and a Raspberry Pi 5, and the ideas that were tried and dropped,

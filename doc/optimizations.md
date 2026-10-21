@@ -728,6 +728,11 @@ Bits−1-squaring traces for the nodes past the orbit depths; and a
 Euclidean gcd plus a long division per split (~1.5·d² in total). All
 items below are in `src/sketch_impl.h` unless noted.
 
+Gentler explanations of these ideas are in the second half of
+[decode_explained.md](decode_explained.md) (Optimizations 7–10),
+[decode_coding_theory.md](decode_coding_theory.md) and
+[math_decode.md](math_decode.md).
+
 ### Montgomery squaring on an FFT coset
 
 For the root f (monic, degree d), pick N = 2<sup>m</sup> ≥ d and a coset
