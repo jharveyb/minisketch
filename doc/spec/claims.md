@@ -441,14 +441,23 @@ trace K → GF(2).
 - spec: 03-polyarith
 - status: tested
 
-### C47: CLMUL reduction recipes
-- statement: ReduceWithClMul (two folds, needs 2·deg MOD − 2 < b), ReduceTrinomial (needs b + POS ≤ 65 on the lane-shift path and 2·POS − 2 < b), and the ARM shift-fold for b = 64, MOD < 256 compute the remainder of a 2b − 1 bit carry-less product mod x^b + MOD.
+### C47: two folds reduce a product exactly
+- statement: for the modulus f = x^B + m with t = deg m < B and 2t − 2 < B, any p with deg p ≤ 2B − 2 (a product of two reduced elements) satisfies fold(fold(p)) = p mod f, where fold(p) = (p mod x^B) − (p div x^B)·m. This is the algebra behind ReduceWithClMul's and ReduceTrinomial's two folds.
 - source: src/fields/clmul_common_impl.h:123, src/fields/clmul_common_impl.h:179
-- kind: novel (implementation)
-- lean: Minisketch.Field.reduce_correct
-- native_decide: allowed
+- kind: textbook
+- lean: Minisketch.Reduce.two_folds
 - oracle: GF2Ops
 - tests: TestFieldOps (exhaustive for b ≤ 8)
+- spec: 01-field
+- status: proved
+
+### C49: CLMUL lane recipes
+- statement: the SIMD implementations of the folds are lossless: ReduceTrinomial's 64-bit lane shift path needs B + POS ≤ 65 (and 2·POS − 2 < B, a static_assert), ReduceWithClMul's cross-lane shift needs MOD >> (66 − B) == 0, and the ARM shift-fold for B = 64, MOD < 256 keeps its overflow below 2^7.
+- source: src/fields/clmul_common_impl.h:123, src/fields/clmul_common_impl.h:179
+- kind: novel (implementation)
+- lean: -
+- oracle: GF2Ops
+- tests: TestFieldOps (exhaustive for b ≤ 8, random above), tests/differential.py and tests/conformance.py (clmul vs generic vs Python), fuzz roundtrip
 - spec: 01-field
 - status: tested
 

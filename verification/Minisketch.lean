@@ -10,3 +10,4 @@ import Minisketch.BMEven
 import Minisketch.Decode
 import Minisketch.PolyArith
 import Minisketch.Cantor
+import Minisketch.Reduce
