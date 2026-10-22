@@ -380,6 +380,16 @@ protocol built in.
 
 ### Benchmark A/B protocol
 
+On a remote bench host, run long jobs (a pinned `bench_ab.sh` driver, say)
+with `tools/bench_remote.sh start NAME -- CMD...`, which detaches the job
+into its own session and records its process group and log under
+`~/.bench-jobs/`; `status`, `log NAME` and `stop NAME` act on that record
+only. Do not stop jobs with `pkill`, `killall` or `pgrep`-matched kills:
+`pgrep -f` matches the shell running it, and over Tailscale SSH that
+shell's process group belongs to tailscaled. A TERM from `stop` still runs
+the job's EXIT trap, so a driver that calls `bench_host.sh restore` from
+its trap restores the CPU state.
+
 `tools/bench_ab.sh <ref-A> [ref-B=HEAD]` builds `bench` from two git refs
 ('.' = the current working tree) with identical flags (`-g -O2`), measures
 every configuration in alternating-order rounds, and reports per side the

@@ -21,6 +21,7 @@
 
 - Pin first: `sudo tools/bench_host.sh setup` ... `sudo tools/bench_host.sh restore`, and run with `BENCH_PREFIX="taskset -c <cpu it suggests>"`. Unpinned numbers (turbo, ondemand/schedutil) are not comparable.
 - `tools/bench_ab.sh <refA> <refB>` - interleaved A/B; `IMPL=1` = CLMUL only, `DATA_DIR=<dir>` keeps per-round TSV for plotting; `tools/bench_progression.sh <host-tag>` runs the branch-progression plan.
+- Long jobs on a bench host: `tools/bench_remote.sh start NAME -- CMD...` / `status` / `log NAME` / `stop NAME` (run on the host, e.g. via ssh). It records the job's process group; never stop jobs with `pkill`, `killall` or `pgrep` patterns (`pgrep -f` matches its own shell, whose group over Tailscale SSH is tailscaled's).
 - `-DMINISKETCH_STAGE_TIMING` - per-stage decode timings to stderr from the COZ markers; its timer overhead inflates tiny per-node calls, so confirm small wins with a real A/B.
 - Algorithm cutoffs in `src/sketch_impl.h` (`MINISKETCH_*` macros) were tuned on an i7-4770, a Pi 5 (Cortex-A76) and Zen 5; retune with `CXXFLAGS_B=-DMINISKETCH_<NAME>=<v> tools/bench_ab.sh . .`.
 
