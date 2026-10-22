@@ -158,29 +158,40 @@ trace K → GF(2).
 - statement: for a sequence with s_{2k} = s_k^2, S = S_odd + S^2 as power series (the even part is Σ s_k^2 x^{2k} = S(x)^2). Hence for C = Λ·S: Λ·C = C^2 + Λ^2·S_odd.
 - source: doc/optimizations.md:474, src/sketch_impl.h:2606
 - kind: novel
-- lean: Minisketch.BM.tail_identity
+- lean: Minisketch.BMTail.tail_identity
 - oracle: verify_tail_odd (planned)
 - tests: TestBerlekampMasseyVsRef
 - spec: 04-bm
-- status: open
+- status: proved
 
 ### C14: even-position recurrence
 - statement: C_{2j} = C_j^2 + Σ_{i≥1} Λ_i C_{2j−i}; hence if C_k = 0 for L < k < 2j then C_{2j} = C_j^2. (The docs state the second form as an identity; it needs that hypothesis.)
 - source: doc/optimizations.md:467, src/sketch_impl.h:2611
 - kind: novel
-- lean: Minisketch.BM.even_coeff
+- lean: Minisketch.BMTail.even_coeff
 - oracle: verify_tail_odd (planned)
 - tests: TestBerlekampMasseyVsRef
 - spec: 04-bm
-- status: open
+- status: proved
 
 ### C15: odd-only tail check is exact
-- statement: if Λ (length L) generates s_1..s_{2L+1}, then Λ generates s_1..s_N iff u_j + Σ_a Λ_a^2 u_{j−a} = 0 for all tail positions, u_j = s_{2j+1}. So early termination plus the tail check returns exactly what textbook BM returns, including the max_degree failure.
+- statement: let Λ have Λ_0 = 1 and degree ≤ L, and let the discrepancies C_k = [Λ·S]_k vanish for L < k ≤ P with P ≥ 2L. Then C_k = 0 for all L < k ≤ N iff u_j + Σ_{a≥1} Λ_a^2 u_{j−a} = 0 (u_j = s_{2j+1}) at every odd 2j+1 in (P, N]. So checking the stored odd syndromes against Λ^2 is exactly the full LFSR check.
 - source: doc/optimizations.md:465, src/sketch_impl.h:2450, src/sketch_impl.h:2606
 - kind: novel
-- lean: Minisketch.BM.bm_odd_early_eq_bm
+- lean: Minisketch.BMTail.tail_check_iff
 - oracle: bm_odd (planned)
 - tests: TestBerlekampMasseyVsRef (all tail tiers)
+- spec: 04-bm
+- status: proved
+
+### C48: early termination returns the textbook BM result
+- statement: BerlekampMasseyOdd with early termination and the bulk tail check returns exactly what textbook BM over all 2c syndromes returns, including the max_degree failure. Follows from C12 and C15: once the check passes, every remaining discrepancy is 0, and BM makes no update on a zero discrepancy; a failing check resumes BM where it stopped.
+- source: doc/optimizations.md:465, src/sketch_impl.h:2623
+- kind: novel
+- lean: Minisketch.BM.bm_odd_early_eq_bm
+- depends: C12, C15
+- oracle: bm_odd (planned)
+- tests: TestBerlekampMasseyVsRef (all tail tiers), TestBerlekampMasseyExhaustive
 - spec: 04-bm
 - status: tested
 
