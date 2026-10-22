@@ -18,8 +18,9 @@
  * The transform evaluates a polynomial of degree < 2^t at the 2^t points of
  * the subspace spanned by a Cantor special basis: beta_0 = 1 and
  * beta_j^2 + beta_j = beta_{j-1}, built with the field's Qrt operation. The
- * chain cannot fail in fields of power-of-two degree: the image of x^2 + x
- * is the trace-zero hyperplane, and every chain element stays inside it.
+ * chain cannot fail in fields of power-of-two degree b: y^2 + y = c is
+ * solvable iff Tr(c) = 0, and there Tr = S^(b-1) (the subspace polynomial),
+ * so Tr(beta_j) = S^(b-1-j)(S^j(beta_j)) = S^(b-1-j)(1) = 0 for j < b - 1.
  *
  * Algorithm: the "Cantor algorithm" as presented by Badakhshan, Samanta and
  * Gong, "Accelerating Post-quantum Secure zkSNARKs by Optimizing Additive

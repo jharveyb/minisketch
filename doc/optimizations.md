@@ -457,16 +457,19 @@ s<sub>k</sub>² (equivalently S(x)² = S<sub>even</sub>(x)). Two consequences:
 
 * **Even steps have zero discrepancy.** This is the classical binary-BCH
   simplification (Berlekamp 1968). It holds for every Frobenius-structured
-  sequence, not only genuine sketches, so BM skips those steps. Verified
-  exhaustively against a textbook oracle over GF(4)…GF(256), plus the
-  property tests.
+  sequence, not only genuine sketches, so BM skips those steps. Proved in
+  Lean for every such sequence (claim C12 in [spec/claims.md](spec/claims.md)),
+  and checked exhaustively against textbook BM: the C++ unit tests over
+  GF(4)…GF(16) at small capacities, the Python oracle up to GF(256).
 * **Early termination with an exact tail check.** Once the LFSR length L
   stops growing, the connection polynomial Λ is checked against all
   remaining *odd*-indexed constraints at once. The even ones then follow
   from S² = S<sub>even</sub>:
   [x<sup>2j</sup>](ΛS) = ([x<sup>j</sup>](ΛS))² + [x<sup>2j</sup>](Λ·(ΛS mod x<sup>L+1</sup>)),
-  and both terms vanish for j > L once Λ generates the prefix (induction
-  over j, as checking starts past 2L). So the full iteration would see zero
+  when ΛS vanishes on (L, 2j), and both terms vanish for j > L once Λ
+  generates the prefix (induction over j, as checking starts past 2L; the
+  exact identity is [x<sup>2j</sup>](ΛS) = ([x<sup>j</sup>](ΛS))² + Σ<sub>i≥1</sub> Λ<sub>i</sub>[x<sup>2j−i</sup>](ΛS),
+  claims C14, C15). So the full iteration would see zero
   discrepancies through the tail and return the same Λ. That includes
   rejecting a sketch with more than `max_count` differences, since a
   failed check just resumes the iteration.
@@ -700,8 +703,9 @@ random r (Schwartz–Zippel): ~2<sup>−51</sup> at m = 64, but 2<sup>−19</sup
 at m = 32. That weakens the decoder's guarantee against adversarially
 built overfull sketches (low-weight BCH codewords make prefix-only
 matches constructible), so it would need an explicit API-level opt-in
-and several rounds for small fields. Exact verification is Ω(c log n)-ish
-(it is a polynomial product), so this is the only route to O(c).
+and several rounds for small fields. Exact verification is a polynomial
+product, O(c log n) with the FFT tier (no matching lower bound is known),
+so this is the only known route to O(c).
 
 ### Remaining in this area
 
@@ -969,11 +973,13 @@ reusing the carry's buffers measured no difference on x86-64.
   already makes each retry nearly free. Estimated ≤10% in the small-n
   regime, and only before the reducer existed.
 * **Toom-3 for the Karatsuba tier** — evaluation points and interpolation
-  divisions exist in GF(2<sup>m</sup>) for m ≥ 3, but the extra
+  divisions exist in GF(2<sup>m</sup>) for m ≥ 2 (five points including ∞
+  already exist in GF(4)), but the extra
   interpolation cost makes it marginal over Karatsuba in practice; an
   additive FFT is the better use of complexity budget.
-* **Explicit quintic+ solvers** — no closed form exists for degree ≥ 5
-  (the affine trick stops at linearized-polynomial degrees 2<sup>k</sup>;
+* **Explicit quintic+ solvers** — no cheap closed form is known for degree
+  ≥ 5 (Abel–Ruffini does not apply here: over a finite field every
+  polynomial is solvable by radicals, so the obstacle is cost; the affine trick stops at linearized-polynomial degrees 2<sup>k</sup>;
   degree-8 affine multiples exist but the general reduction to them is no
   longer cheap). The Fedorenko-Trifonov affine-decomposition family targets
   full-domain evaluation (Chien-style, feasible only for small fields), not

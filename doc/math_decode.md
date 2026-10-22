@@ -22,7 +22,7 @@ Every polynomial produced by splitting divides *L*. And for any divisor *G* of *
 
 **A free test for undecodable sketches**
 
-One more squaring gives *x<sup>2<sup>b</sup></sup>* modulo *L*. Every element *a* of *GF(2<sup>b</sup>)* satisfies *a<sup>2<sup>b</sup></sup> = a*. Therefore *x<sup>2<sup>b</sup></sup> - x* is the product of *(x - a)* over all field elements, and *L* divides it exactly when its roots are distinct field elements. So *x<sup>2<sup>b</sup></sup> = x mod L* holds if and only if the sketch is decodable, which we now know before any splitting starts.
+One more squaring gives *x<sup>2<sup>b</sup></sup>* modulo *L*. Every element *a* of *GF(2<sup>b</sup>)* satisfies *a<sup>2<sup>b</sup></sup> = a*. Therefore *x<sup>2<sup>b</sup></sup> - x* is the product of *(x - a)* over all field elements, and *L* divides it exactly when its roots are distinct field elements. So *x<sup>2<sup>b</sup></sup> = x mod L* holds if and only if the roots of *L* are distinct field elements. Given that Berlekamp-Massey succeeded within the capacity, that is exactly when the sketch decodes (and 0 is then never a root), which we now know before any splitting starts.
 
 **Delaying the modular reduction**
 

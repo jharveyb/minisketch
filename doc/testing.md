@@ -48,7 +48,7 @@ depth for iteration count deliberately:
 
 | Layer | Capacity / degree | Field sizes |
 | --- | --- | --- |
-| `TestExhaustive` | bits×capacity ≤ ~40 | all |
+| `TestExhaustive` | bits×capacity ≤ 16 + log2(complexity) + 1 (19 at the default complexity 4) | all |
 | `TestRandomized` | 0–8 / 0–128 / 0–4096 tiers, plus a guaranteed 512–1024 tier | all; large tier: 32, 64 |
 | unit tests, reference-checked properties | degree ≤ 12 (quadratic naive references) | 2–8 exhaustive, 11/16/27/32/64 |
 | unit tests, `TestDecodeStagesLarge` (reference-free) | 256 per field; **1024** for the 64-bit field | same |
