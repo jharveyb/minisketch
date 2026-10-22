@@ -84,6 +84,10 @@
 
           # scripts/claude_setup.sh
           jq
+
+          # verification/: elan installs the toolchain pinned in
+          # verification/lean-toolchain; Mathlib comes from `lake exe cache get`.
+          elan
         ];
 
         # Libraries: buildInputs get -isystem include dirs / CMake prefix paths.

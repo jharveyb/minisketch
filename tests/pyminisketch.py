@@ -6,6 +6,7 @@
 """Native Python (slow) reimplementation of libminisketch' algorithms."""
 
 import json
+import math
 import os
 import random
 import unittest
@@ -630,6 +631,53 @@ class TestMinisketchSerialization(unittest.TestCase):
                 sketch.add(v)
             self.assertEqual(sketch.decode(count), sorted(elements))
             self.assertIsNone(sketch.decode(count - 1))
+
+def base_fpbits(bits, capacity):
+    """floor(log2(2^(bits*capacity) / sum_{k<=capacity} C(2^bits - 1, k))), exactly.
+
+    The number of false-positive bits a sketch with max_elements == capacity
+    provides: of the 2^(bits*capacity) sketches, the denominator counts those
+    that decode (one per set of at most capacity nonzero elements). The C++
+    BaseFPBits approximates this, exactly while the result is below 256."""
+    count = sum(math.comb((1 << bits) - 1, k) for k in range(capacity + 1))
+    return bits * capacity - (count - 1).bit_length()
+
+def compute_capacity(bits, max_elements, fpbits):
+    """minisketch_compute_capacity, from the exact base_fpbits."""
+    if bits == 0:
+        return 0
+    base = base_fpbits(bits, max_elements)
+    if base >= fpbits:
+        return max_elements
+    return max_elements + (fpbits - base + bits - 1) // bits
+
+def compute_max_elements(bits, capacity, fpbits):
+    """minisketch_compute_max_elements: the largest max_elements whose
+    compute_capacity fits in capacity, or 0 if there is none."""
+    if bits == 0:
+        return 0
+    for max_elements in range(capacity, -1, -1):
+        if compute_capacity(bits, max_elements, fpbits) <= capacity:
+            return max_elements
+    return 0
+
+class TestFalsePositives(unittest.TestCase):
+    """Sanity checks of the exact capacity functions."""
+
+    def test_base_fpbits(self):
+        self.assertEqual(base_fpbits(8, 0), 0)
+        # One element in GF(2^b): 2^b sketches, 2^b - 1 + 1 decode.
+        for bits in range(2, 65):
+            self.assertEqual(base_fpbits(bits, 1), 0)
+        # A full GF(4) sketch of capacity 3 decodes every 3-subset of {1,2,3}.
+        self.assertEqual(base_fpbits(2, 3), 6 - 3)
+
+    def test_inverse(self):
+        for bits in (2, 5, 12, 32, 64):
+            for fpbits in (0, 8, 32):
+                for max_elements in range(0, 40):
+                    capacity = compute_capacity(bits, max_elements, fpbits)
+                    self.assertGreaterEqual(compute_max_elements(bits, capacity, fpbits), max_elements)
 
 class TestGoldenVectors(unittest.TestCase):
     """Fixed known-good serializations, shared with the C++ test suite.

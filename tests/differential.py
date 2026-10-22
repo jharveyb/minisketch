@@ -24,6 +24,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pyminisketch import Minisketch as PyMinisketch  # noqa: E402
+from pyminisketch import compute_capacity, compute_max_elements  # noqa: E402
 
 
 class CMinisketch:
@@ -82,6 +83,10 @@ def load_lib(path):
     lib.minisketch_merge.restype = ctypes.c_size_t
     lib.minisketch_merge.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
     lib.minisketch_decode.restype = ctypes.c_ssize_t
+    lib.minisketch_compute_capacity.argtypes = [ctypes.c_uint32, ctypes.c_size_t, ctypes.c_uint32]
+    lib.minisketch_compute_capacity.restype = ctypes.c_size_t
+    lib.minisketch_compute_max_elements.argtypes = [ctypes.c_uint32, ctypes.c_size_t, ctypes.c_uint32]
+    lib.minisketch_compute_max_elements.restype = ctypes.c_size_t
     lib.minisketch_decode.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_uint64)]
     return lib
 
@@ -187,6 +192,28 @@ def check_golden(lib, path):
     print(f"{len(vectors)} golden vectors OK (C library)")
 
 
+def check_capacity_functions(lib, rng):
+    """compute_capacity / compute_max_elements against the exact big-integer
+    definitions in pyminisketch, for every field size. The C++ BaseFPBits is
+    exact below 256 false-positive bits, so fpbits is kept at most 256."""
+    count = 0
+    for bits in range(2, 65):
+        fps = sorted({0, 1, 255, 256} | {rng.randrange(0, 257) for _ in range(6)})
+        for max_elements in range(0, 129):
+            for fpbits in fps:
+                exact = compute_capacity(bits, max_elements, fpbits)
+                got = lib.minisketch_compute_capacity(bits, max_elements, fpbits)
+                assert got == exact, f"compute_capacity({bits}, {max_elements}, {fpbits}) = {got}, exact {exact}"
+                count += 1
+        for _ in range(8):
+            capacity, fpbits = rng.randrange(0, 129), rng.randrange(0, 257)
+            exact = compute_max_elements(bits, capacity, fpbits)
+            got = lib.minisketch_compute_max_elements(bits, capacity, fpbits)
+            assert got == exact, f"compute_max_elements({bits}, {capacity}, {fpbits}) = {got}, exact {exact}"
+            count += 1
+    print(f"{count} capacity-function cases OK")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lib', required=True, help="path to libminisketch shared library")
@@ -207,6 +234,8 @@ def main():
     golden = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'golden_vectors.json')
     if os.path.exists(golden):
         check_golden(lib, golden)
+
+    check_capacity_functions(lib, rng)
 
     # Small capacities decode fast enough in pure Python; the C++ side is
     # fully random-tested elsewhere, this is about implementation agreement.

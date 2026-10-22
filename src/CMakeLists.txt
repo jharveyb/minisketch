@@ -106,6 +106,11 @@ if(MINISKETCH_BUILD_TESTS)
       COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/tests/differential.py
         --lib $<TARGET_FILE:minisketch-testlib>
     )
+    # Claim registry consistency (doc/spec/claims.md vs the oracle); the Lean
+    # half needs the verification/ project and runs separately.
+    add_test(NAME ${PROJECT_NAME}_claims
+      COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/verification/check_claims.py --no-lean
+    )
   endif()
 endif()
 
