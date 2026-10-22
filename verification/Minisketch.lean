@@ -4,3 +4,5 @@ import Minisketch.BMTail
 import Minisketch.PowerSumSplit
 import Minisketch.Subspace
 import Minisketch.Trace
+import Minisketch.BM
+import Minisketch.BMPowerSum

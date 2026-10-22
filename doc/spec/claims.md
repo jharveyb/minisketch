@@ -72,14 +72,14 @@ trace K → GF(2).
 - status: proved
 
 ### C5: BM finds the shortest LFSR
-- statement: Berlekamp–Massey on s_1..s_N returns the minimal-length connection polynomial generating the sequence (Massey 1969); with N = 2c and the true set of size ≤ c it returns Λ.
+- statement: textbook Berlekamp–Massey (Massey 1969) after n terms returns a connection polynomial C (C_0 = 1) of length L that generates s_1..s_n, and every LFSR generating s_1..s_n has length ≥ L. Key step (Massey's lemma): if a length-L LFSR generates s_1..s_n but not s_{n+1}, every LFSR generating s_1..s_{n+1} has length ≥ n + 1 − L. With N = 2c and a true set of size ≤ c this gives Λ (with C3).
 - source: doc/math.md:102
 - kind: textbook
-- lean: Minisketch.BM.bm_minimal
+- lean: Minisketch.BM.bm_minimal, Minisketch.BM.massey_lemma
 - oracle: berlekamp_massey
 - tests: TestBerlekampMassey
 - spec: 04-bm
-- status: open
+- status: proved
 
 ### C6: elements are the roots of rev(Λ)
 - statement: the roots of f = x^n Λ(1/x) are exactly the m ∈ M.
@@ -393,8 +393,8 @@ trace K → GF(2).
 - statement: for t with t(α) ∈ {0,1} at every root α of g (root set R, 0 ∉ R) and A = {α : t(α) = 1}: (a) P_k = Σ_α t(α)α^k = Σ_j t_j Q_{j+k}, so P_{2k} = P_k^2; (b) if |R| ≤ 2M and BM on P_1..P_{2M} returns a polynomial whose reversal f_B = Π_{β∈B}(x − β) divides g (so B ⊆ R; this is what CosetDivide certifies), then B = A, so the children inherit correct power sums. The proof needs BM's minimality (C5: |B| ≤ |A|, since Λ_A also generates P): divisibility alone does not exclude a superset of A. Then Σ_{α∈A∖B} α^m f_B(α) = 0 for m = 1..2M−|B| ≥ |A∖B| forces A ⊆ B (weighted Vandermonde). (c) A BM result of length 1 means A = ∅. (d) The other side has power sums Q_k − P_k.
 - source: src/sketch_impl.h:1994, doc/optimizations.md:822, doc/math_decode.md:59
 - kind: novel
-- lean: Minisketch.PowerSumSplit.side_unique
-- depends: C5
+- lean: Minisketch.PowerSumSplit.side_unique, Minisketch.BMPowerSum.bm_len_le_card
+- depends: C5, C48
 - oracle: power_sum_split
 - tests: TestFindRootsMontgomery (intact and corrupted sums)
 - spec: 05-roots
