@@ -169,4 +169,37 @@ theorem decode_reencodes [CharP K 2] [DecidableEq K] (s : ℕ → K) (hs : Frobe
         (fun h => h0R (h ▸ hα))) h1
     omega
 
+/-- A product of two series supported on `[0, a]` and `[0, b]` is supported on
+`[0, a + b]`. -/
+theorem coeff_mul_supp (F G : K⟦X⟧) (a b : ℕ) (hF : ∀ i, a < i → coeff i F = 0)
+    (hG : ∀ i, b < i → coeff i G = 0) (k : ℕ) (hk : a + b < k) : coeff k (F * G) = 0 := by
+  rw [coeff_mul]
+  refine Finset.sum_eq_zero fun p hp => ?_
+  rw [Finset.HasAntidiagonal.mem_antidiagonal] at hp
+  by_cases ha : a < p.1
+  · rw [hF _ ha, zero_mul]
+  · rw [hG _ (by omega), mul_zero]
+
+/-- C16: for a set `R`, the stored odd syndromes `u_j = s_{2j+1}` satisfy the
+recurrence with `Λ_R^2`: `Λ_R^2 · S_odd` is a polynomial of degree at most
+`2|R|`. (From C13 and C2: `Λ² S_odd = Λ C + C²` with `C = Λ S` the odd part of
+`Λ`, both of degree at most `|R|`.) -/
+theorem odd_recurrence [CharP K 2] [DecidableEq K] (R : Finset K) (k : ℕ) (hk : 2 * R.card < k) :
+    coeff k (loc R ^ 2 * oddPart (psum R)) = 0 := by
+  have hs : Frobenius (psum R) := fun k _ => psum_two_mul R k
+  have hloc : loc R = ps fun i => coeff i (loc R) := by ext i; simp [ps]
+  have hC : loc R * series (psum R) = oddPart (fun i => coeff i (loc R)) := by
+    rw [loc_mul_series, hloc, neg_euler, ← hloc]
+  have hid := tail_identity (psum R) hs (loc R)
+  rw [hC] at hid
+  obtain ⟨hz, _⟩ := loc_coeff R
+  have hodd : ∀ i, R.card < i → coeff i (oddPart fun i => coeff i (loc R)) = 0 := by
+    intro i hi; rw [oddPart_coeff, hz i hi]; simp
+  have : CharP K⟦X⟧ 2 := charP_of_injective_algebraMap (algebraMap K K⟦X⟧).injective 2
+  have e : loc R ^ 2 * oddPart (psum R) =
+      loc R * oddPart (fun i => coeff i (loc R)) + oddPart (fun i => coeff i (loc R)) ^ 2 := by
+    rw [hid, add_comm, ← add_assoc, CharTwo.add_self_eq_zero, zero_add]
+  rw [e, map_add, coeff_mul_supp _ _ R.card R.card hz hodd k (by omega), sq,
+    coeff_mul_supp _ _ R.card R.card hodd hodd k (by omega), add_zero]
+
 end Minisketch.Decode

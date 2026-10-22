@@ -199,11 +199,11 @@ trace K → GF(2).
 - statement: u_j = s_{2j+1} = Σ_m m·(m^2)^j, so u satisfies the LFSR with connection polynomial Λ^{(2)} (each coefficient squared) whose roots are the m^2.
 - source: src/sketch_impl.h:2450, doc/decode_coding_theory.md:38
 - kind: textbook
-- lean: Minisketch.BM.odd_recurrence
+- lean: Minisketch.Decode.odd_recurrence
 - oracle: verify_tail_odd
 - tests: TestBerlekampMasseyVsRef
 - spec: 04-bm
-- status: open
+- status: proved
 
 ### C17: transposed Karatsuba middle product
 - statement: for c = c0 + x^h c1 and w = w0 + x^h w1 + x^{2h} w2, MP(c, w) = (α + MP(c0, w0 + w1), α + MP(c1, w1 + w2)) with α = MP(c0 + c1, w1), in characteristic 2.
@@ -383,11 +383,11 @@ trace K → GF(2).
 - statement: with X_k = Π_{j∈bits(k)} S^j and (S^j)' = 1, X_k' = Σ_{j∈bits(k)} X_{k − 2^j}.
 - source: doc/optimizations.md:767, src/additive_fft.h:312
 - kind: novel (application of Lin–Chung–Han)
-- lean: Minisketch.AdditiveFFT.novel_derivative
+- lean: Minisketch.Subspace.novel_derivative
 - oracle: novel_derivative
 - tests: TestAdditiveFFT
 - spec: 03-polyarith
-- status: open
+- status: proved
 
 ### C35: power-sum split
 - statement: for t with t(α) ∈ {0,1} at every root α of g (root set R, 0 ∉ R) and A = {α : t(α) = 1}: (a) P_k = Σ_α t(α)α^k = Σ_j t_j Q_{j+k}, so P_{2k} = P_k^2; (b) if |R| ≤ 2M and BM on P_1..P_{2M} returns a polynomial whose reversal f_B = Π_{β∈B}(x − β) divides g (so B ⊆ R; this is what CosetDivide certifies), then B = A, so the children inherit correct power sums. The proof needs BM's minimality (C5: |B| ≤ |A|, since Λ_A also generates P): divisibility alone does not exclude a superset of A. Then Σ_{α∈A∖B} α^m f_B(α) = 0 for m = 1..2M−|B| ≥ |A∖B| forces A ⊆ B (weighted Vandermonde). (c) A BM result of length 1 means A = ∅. (d) The other side has power sums Q_k − P_k.
@@ -401,14 +401,14 @@ trace K → GF(2).
 - status: proved
 
 ### C36: Montgomery full-split test
-- statement: X_b ≡ x mod f iff the Montgomery forms of X_b and x agree on C, given deg f ≤ N (the difference has degree < N and N zeros).
+- statement: with r the Montgomery reduction of X̃_b − x̃ (so r ≡ X^{2^b} − X mod f) and deg r < deg f ≤ N = |C|: r vanishes on C iff f | X^{2^b} − X, i.e. iff x^{2^b} ≡ x mod f (C22).
 - source: src/sketch_impl.h:1691
 - kind: novel
 - lean: Minisketch.Montgomery.split_test
 - oracle: montgomery_orbit
 - tests: TestFindRootsMontgomery; pyminisketch TestOracle.test_montgomery_orbit
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C37: a successful decode re-encodes, and 0 is never a root
 - statement: if BM's connection polynomial on a Frobenius-structured syndrome sequence s_1..s_N factors as Π_{α∈R}(1 − αx) over nonzero α, then s_k = Σ_{α∈R} α^k for k ≤ N (the decoded set re-encodes to the sketch) and |R| = L, so the reversed polynomial f = x^L Λ(1/x) has no root 0. Proof: BM's key equation Λ·S ≡ Λ_odd (from the C12 invariant) and C2 for R give Λ·(S − S_R) ≡ 0, and Λ is invertible; then Λ generates s with length |R|, so L ≤ |R| by C5, and deg Λ = |R| ≤ L.

@@ -137,4 +137,30 @@ theorem carry_to_factor [CharP K 2] [DecidableEq K] (C0 C1 : Finset K) (v g q : 
   refine ⟨r, reduce_modEq _ _ _ _ _ hr', fun w hw => ?_⟩
   rw [← hr', eval_mul, h1 w hw, mul_one]
 
+/-- C36, the Montgomery full-split test: if `r ≡ T (mod f)` with
+`deg r < deg f ≤ |C|`, then `r` vanishes on `C` iff `f ∣ T`. With
+`T = X^(2^b) - X` this is the test `x^(2^b) ≡ x (mod f)` done on coset values. -/
+theorem split_test (C : Finset K) (f r T : K[X]) (hrT : f ∣ r - T)
+    (hdeg : r.natDegree < f.natDegree) (hN : f.natDegree ≤ C.card) :
+    (∀ w ∈ C, r.eval w = 0) ↔ f ∣ T := by
+  constructor
+  · intro hz
+    have hr : r = 0 := by
+      by_contra hne
+      have := Polynomial.card_le_degree_of_subset_roots (p := r) (Z := C) (by
+        intro w hw
+        rw [Polynomial.mem_roots hne]
+        exact hz w (Finset.mem_val.mp hw))
+      omega
+    rw [hr, zero_sub, dvd_neg] at hrT
+    exact hrT
+  · intro hT w _
+    have hfr : f ∣ r := by
+      have := dvd_add hrT hT
+      rwa [sub_add_cancel] at this
+    have hr : r = 0 := by
+      by_contra hne
+      exact absurd (Polynomial.natDegree_le_of_dvd hfr hne) (by omega)
+    rw [hr, eval_zero]
+
 end Minisketch.Montgomery

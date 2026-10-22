@@ -232,4 +232,13 @@ theorem cantor_vanishing_derivative [DecidableEq K] (β : ℕ → K) (hβ0 : β 
     derivative (vanishing (coset β η m)) = 1 :=
   vanishing_derivative m η _ (coset_card β hβ0 hβ η m) (coset_S β hβ0 hβ η m)
 
+/-- C34: the novel basis `X_T = Π_{j ∈ T} S^j` has derivative
+`Σ_{j ∈ T} X_{T \ {j}}`, since every `(S^j)' = 1`. With `T` the bit set of `k`
+this is `X_k' = Σ_{j ∈ bits(k)} X_{k - 2^j}`. -/
+theorem novel_derivative (T : Finset ℕ) :
+    derivative (∏ j ∈ T, (S j : K[X])) = ∑ j ∈ T, ∏ i ∈ T.erase j, (S i : K[X]) := by
+  rw [derivative_prod_finset]
+  refine Finset.sum_congr rfl fun j _ => ?_
+  rw [S_derivative, mul_one]
+
 end Minisketch.Subspace
