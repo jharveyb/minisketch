@@ -38,6 +38,7 @@ One module per area, matching the sections of the registry:
 | `Minisketch/BMTail.lean` | BM tail identity, even/odd discrepancy recurrences, exactness of the odd-only tail check (C13–C15) |
 | `Minisketch/PowerSumSplit.lean` | power-sum split formula, uniqueness of the BM-recovered side, empty side, complement (C35) |
 | `Minisketch/Montgomery.lean` | coset Montgomery step, carry to a child, Montgomery-form gcd, CosetDivide (C30–C33) |
+| `Minisketch/Subspace.lean` | subspace polynomials on a Cantor chain, coset vanishing polynomials with derivative 1, coset halving; C30/C31 on real cosets (C29) |
 
 Theorems are stated over an arbitrary field `K` of characteristic 2
 (`[Field K] [CharP K 2]`), adding `[Fintype K]` with `card K = 2^b` where the

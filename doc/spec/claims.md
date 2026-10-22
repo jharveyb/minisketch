@@ -328,20 +328,20 @@ trace K → GF(2).
 - status: open
 
 ### C29: coset vanishing polynomial
-- statement: for the subspace W_m spanned by the Cantor basis and a coset C = W_m + η, Z_C(x) = S^m(x) + S^m(η) is monic of degree 2^m, has only monomials x^{2^j} plus a constant, and Z_C' = 1.
+- statement: for a Cantor chain (β_0 = 1, β_{j+1}^2 + β_{j+1} = β_j) the subspace polynomials S^0 = x, S^{m+1} = (S^m)^2 + S^m are additive, monic of degree 2^m, with (S^m)' = 1, S^m(β_{j+m}) = β_j and S^m(β_j) = 0 for j < m. The chain is GF(2)-independent, so the coset C = η + span(β_0..β_{m−1}) has 2^m points, Z_C = S^m + S^m(η) and Z_C' = 1. Halving: Z_{C0} = 1 on C1 = C0 + β_{m−1}.
 - source: src/sketch_impl.h:1319, doc/optimizations.md:740, src/additive_fft.h:28
 - kind: textbook (Cantor)
-- lean: Minisketch.Montgomery.vanishing_derivative
+- lean: Minisketch.Subspace.cantor_vanishing_derivative
 - oracle: cantor_basis (planned)
 - tests: TestAdditiveFFT
 - spec: 03-polyarith
-- status: open
+- status: proved
 
 ### C30: Montgomery squaring by the derivative
 - statement: let N = |C|, R = Z_C, deg a < 2N, gcd(f, R) = 1, q ≡ a/f on C (deg q < N) and h = a + q f. Then R | h, r = h/R satisfies r ≡ a·R^{-1} mod f, deg r < max(N, deg f), and r(w) = a'(w) + q'(w) f(w) + q(w) f'(w) for w ∈ C. If a is a square, a' = 0.
 - source: doc/optimizations.md:743, src/sketch_impl.h:1325, doc/math_decode.md:39
 - kind: novel
-- lean: Minisketch.Montgomery.reduce_spec
+- lean: Minisketch.Subspace.reduce_coset
 - depends: C29
 - oracle: mont_square (planned)
 - tests: TestFindRootsMontgomery
@@ -352,7 +352,7 @@ trace K → GF(2).
 - statement: C = C0 ⊔ C1 (cosets of W_{m−1}), Z_C = Z_{C0}·Z_{C1}, and Z_{C0} ≡ 1 on C1. So a value vector of v·Z_C mod g on C converts to v·Z_{C1} mod g on C1 with one pointwise division and one size-N/2 interpolation.
 - source: src/sketch_impl.h:1339, doc/optimizations.md:780
 - kind: novel
-- lean: Minisketch.Montgomery.carry_to_factor
+- lean: Minisketch.Subspace.carry_coset
 - depends: C29
 - oracle: mont_carry_to_factor (planned)
 - tests: TestFindRootsMontgomery
