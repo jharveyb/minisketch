@@ -11,7 +11,9 @@ For every claim:
   unless marked `(planned)`;
 - a `proved` or `stated` claim has a `lean:` theorem that exists;
 - a `proved` claim's theorem uses no sorryAx and only the standard axioms
-  (plus Lean.ofReduceBool when the claim says `native_decide: allowed`).
+  (plus Lean.ofReduceBool when the claim says `native_decide: allowed`);
+- `depends:` names existing claims; proved claims whose dependencies are not
+  proved yet are listed as conditional.
 
 Lean checks need a built project (`lake build`); run from anywhere:
     python3 verification/check_claims.py [--no-lean]
@@ -113,10 +115,32 @@ def main():
                 if bad:
                     errors.append(f"{c['id']}: proved, but {c['lean']} uses {sorted(bad)}")
 
+    by_id = {c['id']: c for c in claims}
+    for c in claims:
+        for dep in c.get('depends', '').replace(',', ' ').split():
+            if dep not in by_id:
+                errors.append(f"{c['id']}: depends on unknown claim {dep}")
+
+    def unproved_deps(c, seen=()):
+        out = set()
+        for dep in c.get('depends', '').replace(',', ' ').split():
+            d = by_id.get(dep)
+            if d is None or dep in seen:
+                continue
+            if d.get('status') != 'proved':
+                out.add(dep)
+            out |= unproved_deps(d, seen + (c['id'],))
+        return out
+
     counts = {}
     for c in claims:
         counts[c.get('status')] = counts.get(c.get('status'), 0) + 1
     print(f"{len(claims)} claims: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+    for c in claims:
+        if c.get('status') == 'proved':
+            pending = unproved_deps(c)
+            if pending:
+                print(f"  {c['id']} proved conditionally on {', '.join(sorted(pending))}")
     for e in errors:
         print("ERROR:", e)
     sys.exit(1 if errors else 0)

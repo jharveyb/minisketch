@@ -18,6 +18,8 @@ Field meanings:
 - **status**: `proved` (Lean, no sorry), `stated` (Lean statement present,
   proof pending or `sorry`), `tested` (checked by tests only), `open` (neither
   yet), `not-a-theorem` (heuristic; the evidence is listed instead).
+- **depends**: claims a Lean proof takes as hypotheses. A `proved` claim is
+  only unconditional once everything it depends on is proved too.
 - **lean / oracle / tests / spec**: the Lean theorem, the pyminisketch function,
   the C++ test group or fuzz target, the spec section. `-` means none yet;
   `(planned)` marks a name that does not exist yet.
@@ -328,31 +330,33 @@ trace K → GF(2).
 - statement: let N = |C|, R = Z_C, deg a < 2N, gcd(f, R) = 1, q ≡ a/f on C (deg q < N) and h = a + q f. Then R | h, r = h/R satisfies r ≡ a·R^{-1} mod f, deg r < max(N, deg f), and r(w) = a'(w) + q'(w) f(w) + q(w) f'(w) for w ∈ C. If a is a square, a' = 0.
 - source: doc/optimizations.md:743, src/sketch_impl.h:1325, doc/math_decode.md:39
 - kind: novel
-- lean: Minisketch.Montgomery.reduce_eval
+- lean: Minisketch.Montgomery.reduce_spec
+- depends: C29
 - oracle: mont_square (planned)
 - tests: TestFindRootsMontgomery
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C31: coset halving
 - statement: C = C0 ⊔ C1 (cosets of W_{m−1}), Z_C = Z_{C0}·Z_{C1}, and Z_{C0} ≡ 1 on C1. So a value vector of v·Z_C mod g on C converts to v·Z_{C1} mod g on C1 with one pointwise division and one size-N/2 interpolation.
 - source: src/sketch_impl.h:1339, doc/optimizations.md:780
 - kind: novel
 - lean: Minisketch.Montgomery.carry_to_factor
+- depends: C29
 - oracle: mont_carry_to_factor (planned)
 - tests: TestFindRootsMontgomery
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C32: unit multiples do not change the gcd
 - statement: if gcd(Z_C, g) = 1 then gcd(g, T·Z_C mod g) = gcd(g, T).
 - source: src/sketch_impl.h:1596, doc/optimizations.md:810
 - kind: novel (application)
-- lean: Minisketch.Montgomery.gcd_unit_mul
+- lean: Minisketch.Montgomery.dvd_mod_mul_unit_iff
 - oracle: -
 - tests: TestFindRootsMontgomery
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C33: CosetDivide is exact
 - statement: if g, h are monic, deg g ≤ N, and the polynomial q interpolated from g(w)/h(w) on C (|C| = N, h nonzero on C) is monic of degree deg g − deg h, then q·h = g.
@@ -362,7 +366,7 @@ trace K → GF(2).
 - oracle: coset_divide (planned)
 - tests: TestFindRootsMontgomery
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C34: novel-basis derivative
 - statement: with X_k = Π_{j∈bits(k)} S^j and (S^j)' = 1, X_k' = Σ_{j∈bits(k)} X_{k − 2^j}.

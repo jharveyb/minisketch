@@ -35,6 +35,7 @@ One module per area, matching the sections of the registry:
 | Module | Claims |
 |---|---|
 | `Minisketch/Sketch.lean` | power sums: linearity, Frobenius halving, uniqueness (C1, C3, C4) |
+| `Minisketch/Montgomery.lean` | coset Montgomery step, carry to a child, Montgomery-form gcd, CosetDivide (C30–C33) |
 
 Theorems are stated over an arbitrary field `K` of characteristic 2
 (`[Field K] [CharP K 2]`), adding `[Fintype K]` with `card K = 2^b` where the
