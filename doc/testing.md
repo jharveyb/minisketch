@@ -16,6 +16,15 @@ finding, TraceMod reduction, ...) can be swapped out and validated quickly.
 | Fuzzing | `fuzz` (`src/fuzz/`, libFuzzer) | attacker-controlled serializations, data-driven sets, internal poly ops | same invariants, coverage-guided, under ASan/UBSan + `MINISKETCH_VERIFY` |
 | Differential (Python) | `tests/differential.py` | C++ library vs. pure-Python reimplementation | independent implementation (`tests/pyminisketch.py`) |
 | Golden vectors | `tests/golden_vectors.json` | serialization stability | fixed known-good bytes, asserted by both C++ and Python suites |
+| Optimized-decode oracle | `tests/pyminisketch.py` (`TestOracle`, `TestModuli`, `TestFalsePositives`) | each decode optimization (odd BM with early termination, middle product, Frobenius orbit, tower betas, additive FFT, coset Montgomery, CosetDivide, power-sum split, the whole decoder), the field moduli, the capacity functions | the textbook functions in the same file; exhaustive for the tiny fields |
+| Proofs | `verification/` (Lean 4 + Mathlib), `verification/check_claims.py` | the mathematical claims in `doc/spec/claims.md` | machine-checked proofs; the registry records what is proved, what is only tested, and by which test |
+
+The proofs are about the mathematics and about executable models of the
+algorithms (textbook BM, the odd-step BM with early termination), not about
+the C++ itself; the differential tests tie the C++ to the Python oracle,
+which implements the same models. `check_claims.py --no-lean` runs under
+ctest; the Lean half needs `cd verification && lake exe cache get && lake build`
+(see `verification/README.md`).
 
 The verify builds (`test-verify`, `unit-tests`, `fuzz`) compile with
 `MINISKETCH_VERIFY`, which turns the internal `CHECK_SAFE` invariant
