@@ -97,10 +97,10 @@ trace K → GF(2).
 - kind: textbook (computation)
 - lean: Minisketch.Moduli.all_irreducible
 - native_decide: allowed
-- oracle: GF2_MODULI
-- tests: TestFieldOps (bits ≤ 8 only, via all inverses)
+- oracle: gf2x_irreducible
+- tests: pyminisketch TestModuli (Rabin test for b = 2..64, plus no lower-weight and no lexicographically smaller same-weight irreducible); TestFieldOps (bits ≤ 8, via all inverses)
 - spec: 01-field
-- status: open
+- status: tested
 
 ### C8: Log2Factorial
 - statement: Log2Factorial(x) = floor(log2 x!) for x ≤ 57 and ≤ floor(log2 x!) for all x < 2^32.

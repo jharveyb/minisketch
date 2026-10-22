@@ -152,6 +152,68 @@ class GF2Ops:
         assert r1 == 1
         return t1
 
+def gf2x_mulmod(a, b, f):
+    """Product of two GF(2)[x] polynomials (as integers) modulo f."""
+    d = f.bit_length() - 1
+    r = 0
+    while b:
+        if b & 1:
+            r ^= a
+        b >>= 1
+        a <<= 1
+        if a >> d & 1:
+            a ^= f
+    return r
+
+def gf2x_gcd(a, b):
+    while b:
+        while a and a.bit_length() >= b.bit_length():
+            a ^= b << (a.bit_length() - b.bit_length())
+        a, b = b, a
+    return a
+
+def gf2x_irreducible(f):
+    """Rabin's test: f of degree n is irreducible over GF(2) iff
+    x^(2^n) = x mod f and gcd(x^(2^(n/p)) - x, f) = 1 for every prime p | n."""
+    n = f.bit_length() - 1
+    def frob(k):
+        y = 2
+        for _ in range(k):
+            y = gf2x_mulmod(y, y, f)
+        return y
+    if frob(n) != 2:
+        return False
+    for p in range(2, n + 1):
+        if n % p == 0 and all(p % q for q in range(2, p)):
+            if gf2x_gcd(f, frob(n // p) ^ 2) != 1:
+                return False
+    return True
+
+class TestModuli(unittest.TestCase):
+    """C7: every modulus is irreducible, of minimal weight, and the
+    lexicographically first such (the docstring above GF2_MODULI)."""
+
+    def test_moduli(self):
+        from itertools import combinations
+        for b in range(2, 65):
+            f = GF2_MODULI[b]
+            self.assertEqual(f.bit_length() - 1, b)
+            self.assertTrue(gf2x_irreducible(f), b)
+            weight = bin(f).count("1")
+            # No irreducible polynomial of lower weight (x^b + ... + 1 with an
+            # odd number of terms; even weight is divisible by x + 1).
+            for w in range(3, weight, 2):
+                for mid in combinations(range(1, b), w - 2):
+                    g = (1 << b) | 1 | sum(1 << e for e in mid)
+                    self.assertFalse(gf2x_irreducible(g), (b, mid))
+            # And none of the same weight that is lexicographically smaller
+            # (comparing exponents from the top).
+            key = sorted((e for e in range(1, b) if f >> e & 1), reverse=True)
+            for mid in combinations(range(1, b), weight - 2):
+                if sorted(mid, reverse=True) < key:
+                    g = (1 << b) | 1 | sum(1 << e for e in mid)
+                    self.assertFalse(gf2x_irreducible(g), (b, mid))
+
 class TestGF2Ops(unittest.TestCase):
     """Test class for basic arithmetic properties of GF2Ops."""
 
