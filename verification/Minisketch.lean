@@ -8,3 +8,4 @@ import Minisketch.BM
 import Minisketch.BMPowerSum
 import Minisketch.BMEven
 import Minisketch.Decode
+import Minisketch.PolyArith

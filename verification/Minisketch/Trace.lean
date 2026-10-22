@@ -215,4 +215,68 @@ theorem frobenius_mod_iff (b : ℕ) (f : K[X]) (hf : f.Monic) :
     X ^ 2 ^ b %ₘ f = X %ₘ f ↔ f ∣ X ^ 2 ^ b - X := by
   rw [← modByMonic_eq_zero_iff_dvd hf, sub_modByMonic, sub_eq_zero]
 
+/-! ### Separation (C25) -/
+
+omit [CharP K 2] in
+/-- The trace polynomial `Σ_{i < b} X^(2^i)` is nonzero of degree `2^(b-1)`. -/
+theorem trPoly_one_natDegree (b : ℕ) (hb : 1 ≤ b) :
+    (trPoly b (1 : K)).natDegree = 2 ^ (b - 1) ∧ trPoly b (1 : K) ≠ 0 := by
+  obtain ⟨b, rfl⟩ : ∃ c, b = c + 1 := ⟨b - 1, by omega⟩
+  have hX : ∀ i, (C (1 : K) * X) ^ 2 ^ i = X ^ 2 ^ i := fun i => by simp
+  simp only [trPoly, hX]
+  rw [Finset.sum_range_succ]
+  have hlt : (∑ i ∈ Finset.range b, (X : K[X]) ^ 2 ^ i).degree < ((X : K[X]) ^ 2 ^ b).degree := by
+    rw [degree_X_pow]
+    refine (degree_sum_le _ _).trans_lt ?_
+    rw [Finset.sup_lt_iff (WithBot.bot_lt_coe _)]
+    intro i hi
+    rw [Finset.mem_range] at hi
+    rw [degree_X_pow]
+    exact_mod_cast Nat.pow_lt_pow_right (by norm_num) hi
+  have hd : (∑ i ∈ Finset.range b, (X : K[X]) ^ 2 ^ i + X ^ 2 ^ b).natDegree = 2 ^ b := by
+    rw [add_comm, natDegree_add_eq_left_of_degree_lt hlt, natDegree_X_pow]
+  refine ⟨by rw [hd, Nat.add_sub_cancel], ne_zero_of_natDegree_gt (n := 0) (by rw [hd]; positivity)⟩
+
+/-- C25: in `GF(2^b)`, if `β_0..β_{b-1}` are GF(2)-independent (distinct subset
+sums), then for `α ≠ α'` some `Tr(β_i α) ≠ Tr(β_i α')`: the trace algorithm
+with these split parameters separates every pair of roots. -/
+theorem separate [Fintype K] [DecidableEq K] (b : ℕ) (hb : 1 ≤ b) (hq : Fintype.card K = 2 ^ b)
+    (β : ℕ → K) (hind : Set.InjOn (fun T : Finset ℕ => ∑ i ∈ T, β i) ((Finset.range b).powerset : Set (Finset ℕ)))
+    (α α' : K) (hne : α ≠ α') : ∃ i, i < b ∧ tr b (β i * α) ≠ tr b (β i * α') := by
+  by_contra hall
+  push Not at hall
+  set δ := α - α'
+  have hδ : δ ≠ 0 := sub_ne_zero.mpr hne
+  -- The subset sums are all of K.
+  have hspan : ∀ γ : K, ∃ T ∈ (Finset.range b).powerset, ∑ i ∈ T, β i = γ := by
+    have hcard : ((Finset.range b).powerset.image fun T => ∑ i ∈ T, β i).card = Fintype.card K := by
+      rw [Finset.card_image_of_injOn hind, Finset.card_powerset, Finset.card_range, hq]
+    have huniv := Finset.eq_univ_of_card _ hcard
+    intro γ
+    have : γ ∈ (Finset.range b).powerset.image fun T => ∑ i ∈ T, β i := by rw [huniv]; simp
+    simpa using this
+  -- So Tr(γ δ) = 0 for every γ, i.e. Tr vanishes on all of K.
+  have hT0 : ∀ T : Finset ℕ, T ⊆ Finset.range b → tr b ((∑ i ∈ T, β i) * δ) = 0 := by
+    intro T
+    induction T using Finset.induction_on with
+    | empty => intro _; simp [tr]
+    | insert j T hj ih =>
+      intro hT
+      have hjb : j < b := Finset.mem_range.mp (hT (by simp))
+      rw [Finset.sum_insert hj, add_mul, tr_add, ih fun x hx => hT (by simp [hx]), add_zero,
+        show β j * δ = β j * α + β j * α' by rw [mul_sub, sub_eq_add_neg, CharTwo.neg_eq],
+        tr_add, hall j hjb, CharTwo.add_self_eq_zero]
+  have hzero : ∀ c : K, (trPoly b (1 : K)).eval c = 0 := by
+    intro c
+    obtain ⟨T, hT, hsum⟩ := hspan (c / δ)
+    rw [trPoly_eval, one_mul, show c = (c / δ) * δ by field_simp, ← hsum]
+    exact hT0 T (Finset.mem_powerset.mp hT)
+  obtain ⟨hdeg, hne0⟩ := trPoly_one_natDegree (K := K) b hb
+  have := Polynomial.card_le_degree_of_subset_roots (p := trPoly b (1 : K)) (Z := Finset.univ)
+    (fun c _ => by rw [Polynomial.mem_roots hne0]; exact hzero c)
+  rw [Finset.card_univ, hq, hdeg] at this
+  exact absurd this (by
+    have : 2 ^ (b - 1) < 2 ^ b := Nat.pow_lt_pow_right (by norm_num) (by omega)
+    omega)
+
 end Minisketch.Trace

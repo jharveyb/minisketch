@@ -38,12 +38,13 @@ One module per area, matching the sections of the registry:
 | `Minisketch/BM.lean` | executable textbook BM model; Massey's lemma; BM returns a shortest LFSR (C5) |
 | `Minisketch/BMPowerSum.lean` | a set's locator generates its power sums, so BM on them has length ≤ the set size (C35's minimality hypothesis) |
 | `Minisketch/BMEven.lean` | even BM discrepancies vanish on Frobenius sequences (C12); early termination with the odd-only tail check returns textbook BM's result (C48) |
-| `Minisketch/Decode.lean` | Λ_R S_R = −xΛ_R′ (C2); a decode BM accepts re-encodes to the input and has no zero root (C37) |
+| `Minisketch/Decode.lean` | Λ_R S_R = −xΛ_R′ (C2); odd-syndrome Λ² recurrence (C16); a decode BM accepts re-encodes to the input and has no zero root (C37) |
 | `Minisketch/BMTail.lean` | BM tail identity, even/odd discrepancy recurrences, exactness of the odd-only tail check (C13–C15) |
-| `Minisketch/Trace.lean` | trace splitting, fail-fast test, gcd side stays in GF(2^b), shared orbit, full-split test, relative trace (C20–C23, C26, C28) |
+| `Minisketch/Trace.lean` | trace splitting, fail-fast test, gcd side stays in GF(2^b), shared orbit, full-split test, relative trace, separation by independent split parameters (C20–C23, C25, C26, C28) |
+| `Minisketch/PolyArith.lean` | transposed Karatsuba middle product (C17) |
 | `Minisketch/PowerSumSplit.lean` | power-sum split formula, uniqueness of the BM-recovered side, empty side, complement (C35) |
-| `Minisketch/Montgomery.lean` | coset Montgomery step, carry to a child, Montgomery-form gcd, CosetDivide (C30–C33) |
-| `Minisketch/Subspace.lean` | subspace polynomials on a Cantor chain, coset vanishing polynomials with derivative 1, coset halving; C30/C31 on real cosets (C29) |
+| `Minisketch/Montgomery.lean` | coset Montgomery step, carry to a child, Montgomery-form gcd, CosetDivide, coset full-split test (C30–C33, C36) |
+| `Minisketch/Subspace.lean` | subspace polynomials on a Cantor chain, coset vanishing polynomials with derivative 1, coset halving, novel-basis derivative; C30/C31 on real cosets (C29, C34) |
 
 Theorems are stated over an arbitrary field `K` of characteristic 2
 (`[Field K] [CharP K 2]`), adding `[Fintype K]` with `card K = 2^b` where the

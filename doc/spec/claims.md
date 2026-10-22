@@ -209,11 +209,11 @@ trace K → GF(2).
 - statement: for c = c0 + x^h c1 and w = w0 + x^h w1 + x^{2h} w2, MP(c, w) = (α + MP(c0, w0 + w1), α + MP(c1, w1 + w2)) with α = MP(c0 + c1, w1), in characteristic 2.
 - source: doc/optimizations.md:489, src/sketch_impl.h:2405
 - kind: textbook (transposition principle)
-- lean: Minisketch.PolyArith.middle_product_karatsuba
+- lean: Minisketch.PolyArith.mp_low, Minisketch.PolyArith.mp_high
 - oracle: middle_product_kara
 - tests: via VerifyTail and PowerSumSplit only
 - spec: 03-polyarith
-- status: open
+- status: proved
 
 ### C18: BM cost
 - statement: BM goes from O(c·n) sequential work to O(n^2) sequential plus O(c·n), O(c·n^0.585) or O(c log n) parallel tail checking, by tier.
@@ -288,14 +288,14 @@ trace K → GF(2).
 - status: open
 
 ### C25: independent β's separate all roots
-- statement: if β_1..β_b are GF(2)-linearly independent, then for α ≠ α' some Tr(β_i α) ≠ Tr(β_i α') (the trace form is nondegenerate).
+- statement: in GF(2^b), if β_0..β_{b−1} are GF(2)-linearly independent (distinct subset sums), then for α ≠ α′ some Tr(β_i α) ≠ Tr(β_i α′). Proof: the subset sums are then all of K, so otherwise Tr(γ(α − α′)) = 0 for every γ, but Tr is a nonzero polynomial of degree 2^{b−1} < |K|.
 - source: src/sketch_impl.h:1758
 - kind: textbook
 - lean: Minisketch.Trace.separate
 - oracle: -
 - tests: TestFindRootsOrbit (rank check)
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C26: shared Frobenius orbit
 - statement: for g | f, (h mod f) mod g = h mod g; and Tr(βx) mod f = Σ_i β^{2^i}·X_i with X_i = x^{2^i} mod f. So one orbit at the root gives every node's trace.
