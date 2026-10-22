@@ -44,8 +44,8 @@ Adding the same element twice removes it.
 `minisketch_add_uint64s(elements, count)` gives exactly the same result as
 calling `add` on each element in order. Internally (informative) it takes K
 elements at a time (K = the batch size: 1, 2, 4 or 8, default 4, set with
-`minisketch_set_batch_size`, which returns 0 and changes nothing for other
-values) and walks u once per group, with K independent multiplication
+`minisketch_set_batch_size`, which returns 1 when it accepts the value and
+0, changing nothing, for other values) and walks u once per group, with K independent multiplication
 chains; leftover elements are added one at a time.
 
 ## Merge
@@ -57,9 +57,10 @@ chains; leftover elements are added one at a time.
 - Otherwise set c_s = min(c_s, c_t), u_s[j] ^= u_t[j] for j < c_s, and
   return the new c_s.
 
-For equal capacities, merging equals XOR of the two serializations. (A
-merge that leaves capacity 0 also returns 0, which the API cannot tell
-apart from failure.)
+For equal capacities, merging equals XOR of the two serializations. A
+merge with a capacity-0 sketch truncates s to capacity 0 and returns 0,
+which the API cannot tell apart from failure; unlike a failed merge, s
+*is* modified.
 
 `minisketch_clone(s)` creates a sketch with the same b, implementation and
 capacity and merges s into it. The clone gets a fresh random seed (the
@@ -281,7 +282,12 @@ Log2Factorial(x):                      # x is a uint32, x >= 1
             + 88632748 * (x < 3 ? 1 : 0)) / 88632748     # 64-bit unsigned arithmetic
 ```
 
-The numerator stays below 2^64 for every x < 2^32.
+All arithmetic is unsigned 64-bit and wraps: evaluated left to right the
+numerator goes "negative" for small x (x = 1 subtracts 127870026 before the
+additions bring it back), so a port with checked arithmetic must use
+wrapping operations or add the positive terms first. The final numerator
+stays below 2^64 for every x < 2^32. `BaseFPBits`, `ComputeCapacity` and
+`ComputeMaxElements` likewise work in unsigned 64-bit integers throughout.
 
 The documented example: b = 32, fpbits = 16, n = 8 gives capacity 9;
 `compute_max_elements(32, 9, 16)` returns 9.

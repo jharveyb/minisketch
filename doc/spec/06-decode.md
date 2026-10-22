@@ -62,9 +62,13 @@ Decode(max_count):                                        # src/sketch_impl.h:29
     return |roots|
 ```
 
-`max_count` is `max_elements` converted to a C `int`. (The API documents
-`output` as an array of `max_elements` entries; the decoder writes at most
-max_count values because L ≤ max_count.)
+`max_count` is min(`max_elements`, 2c, INT_MAX − 1): BM's connection
+polynomial never has more than 2c + 1 terms, so any larger limit means no
+limit. (Before this was fixed, `max_elements` was cast to a C `int`, and at
+INT_MAX the comparison overflowed, while values ≥ 2^31 wrapped negative;
+both made every non-empty decode fail. A port must not reproduce that.)
+The API documents `output` as an array of `max_elements` entries; the
+decoder writes at most max_count values because L ≤ max_count.
 
 ## Call graph
 

@@ -76,8 +76,9 @@ decoder). Chapters 3–5 and 7 describe the fast decoder.
   (`verification/README.md`; `python3 verification/check_claims.py` checks
   the registry).
 - `tests/pyminisketch.py`: a pure-Python implementation. Its first half is
-  the textbook sketch and decoder, the normative reference for decode
-  results. Its section "Optimized decode (oracle)" implements each fast
+  the textbook sketch and decoder, a reference implementation of the
+  normative definition in chapter 6 (that definition, not the file, is
+  normative). Its section "Optimized decode (oracle)" implements each fast
   technique of chapters 4–5 in a few lines (`bm_odd`, `middle_product_kara`,
   `frobenius_orbit`, `tower_betas`, `cantor_basis`, `novel_fft`,
   `mont_square`, `mont_carry_to_factor`, `coset_divide`,
@@ -155,15 +156,20 @@ Where the code and a document disagree, this spec follows the code.
 
 - Whether the degree-2 case `x^2 + a` (a repeated root) can be reached in a
   decode. The code returns failure there (`CHECK_RETURN`, which aborts in
-  `MINISKETCH_VERIFY` builds, so the authors believe it unreachable); a port
-  should return failure.
+  `MINISKETCH_VERIFY` builds); a port should return failure. Informally it
+  cannot: at the root L = 2 forces Λ_1 = s_1 ≠ 0, and BM's output is
+  square-free (a square factor (1 + α²x²) of Λ would leave a shorter LFSR
+  h with h·S ≡ h′, contradicting C5); 0 occurrences in about 3 million
+  random BM runs. Not proved.
 - Whether the `CHECK_RETURN(current.back() != 0)` at the end of
   `BerlekampMasseyOdd` (a connection polynomial with Λ_L = 0) can trigger.
   C37 (proved in Lean, for every BM length L) says a decode that would
   otherwise succeed never has Λ_L = 0; a port should still return failure
-  in that case, as the C++ does. Whether the check can trigger at all
-  (BM ending with Λ_L = 0 on some input) was not determined; it is then
-  just a decode failure.
-- `minisketch_decode` converts `max_elements` to a C `int`; behaviour for
-  `max_elements ≥ 2^31` is not specified by the API and is not specified
-  here.
+  in that case, as the C++ does. Informally the check is dead code: by
+  C12 updates only happen at odd positions, which never touch Λ_L without
+  a length change, and a length change sets Λ_L to a nonzero multiple of
+  the previous top coefficient (0 occurrences in about 3.6 million random
+  BM runs). Not proved.
+- Resolved: `max_elements` beyond 2c means no limit (chapter 6). The
+  clean-room port written from this spec found that the reference cast it
+  to `int` and overflowed at INT_MAX; the library now clamps it.

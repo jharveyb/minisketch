@@ -46,7 +46,9 @@ of K (C25, C27):
 1. **Plain** (root degree < 8): β_k = basis·x^k, where x is the field
    generator (`Mul2`).
 2. **GF(2^8) tower** (root degree ≥ 8 and 8 | b): with z = the generator of
-   GF(2^8) below, β_(8l+j) = basis·x^l·z^j for l < b/8, j < 8. Otherwise
+   GF(2^8) below, β_(8l+j) = basis·x^l·z^j for l < b/8, j < 8 (here, as in
+   all split parameters, x^l is the field element x = 2 raised to l, i.e.
+   `Mul2` applied l times, not the polynomial variable of Tr(βx) mod f). Otherwise
    (root degree ≥ 8, 8 ∤ b) the plain scheme.
 3. **GF(16) tower** (the Montgomery path: root degree ≥ 224, b ∈ {16, 32,
    64}, CLMUL): with z_4 = the generator of GF(16), β_(4l+j) =
@@ -481,7 +483,7 @@ at degree d has probability about 2^(1−d) for random parameters (C41).
 | FindRoots | d < 8 | small path: plain betas, no orbit, ff = false |
 | ComputeTraceOrbit | not (8 ∣ b, d ≥ 224, b ∈ {16,32,64}, CLMUL) | standard orbit with TraceMod |
 | MontgomeryOrbit | m + 2 > b (only b = 16, d > 2^14) | NOT_APPLICABLE → standard orbit, GF(2^8) betas |
-| MontgomeryOrbit | f has a root on all four cosets | NOT_APPLICABLE → standard orbit, GF(2^8) betas |
+| MontgomeryOrbit | f has a root on all four cosets | NOT_APPLICABLE → standard orbit, GF(2^8) betas (common at b = 16: each coset of 2^m ≥ d points expects d·2^m/2^16 roots, so at d = 300 all four are hit about two times in three; rare at b = 32, 64) |
 | ComputeTraceOrbit / MontgomeryOrbit | X_b ≠ x | FAIL (not square-free or not split) |
 | FindRoots | no Q_odd, or d < 256, or no Montgomery carry | no power-sum splits |
 | RecFindRoots | degree 2 with a_1 = 0 | FAIL |
@@ -506,6 +508,12 @@ and the first recursion.
 
 Roots are appended depth-first: at each node the t = 1 factor's roots
 before the t = 0 factor's, and at a quadratic leaf s before s + a_1. The
-order depends on the basis (seed), the split-parameter scheme (root
-degree, b, implementation), the Cantor basis and coset (Montgomery path),
-and the field's internal representation (b = 58, implementation 1).
+order is a deterministic function of the basis (seed, through `FromSeed`,
+whose key depends on the implementation), the split-parameter scheme
+(plain, GF(2^8) or GF(16): root degree, b, implementation and whether the
+Montgomery path ran), trivial splits moving on to the next parameter, the
+quadratic-leaf rule, and the field's internal representation (b = 58,
+implementation 1). It does not depend on the Cantor basis, the coset, the
+carried traces, power-sum splits or CosetDivide: those change how a split
+is computed, not which split it is. (A clean-room port without them
+reproduced libminisketch's order exactly.)
