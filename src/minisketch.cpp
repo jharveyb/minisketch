@@ -5,6 +5,8 @@
  **********************************************************************/
 
 
+#include <algorithm>
+#include <climits>
 #include <new>
 
 #define MINISKETCH_BUILD
@@ -517,7 +519,12 @@ size_t minisketch_merge(minisketch* sketch, const minisketch* other_sketch) {
 ssize_t minisketch_decode(const minisketch* sketch, size_t max_elements, uint64_t* output) {
     const Sketch* s = (const Sketch*)sketch;
     s->Check();
-    return s->Decode(static_cast<int>(max_elements), output);
+    // BM's connection polynomial never has more terms than the 2 * capacity
+    // syndromes it reads, so any larger limit means "no limit". Clamping keeps
+    // the int conversion (and Decode's 1 + max_count) from overflowing.
+    size_t limit = std::min<size_t>(max_elements, 2 * s->Syndromes());
+    if (limit > size_t{INT_MAX} - 1) limit = size_t{INT_MAX} - 1;
+    return s->Decode(static_cast<int>(limit), output);
 }
 
 void minisketch_set_seed(minisketch* sketch, uint64_t seed) {

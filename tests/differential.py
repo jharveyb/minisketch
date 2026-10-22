@@ -214,6 +214,24 @@ def check_capacity_functions(lib, rng):
     print(f"{count} capacity-function cases OK")
 
 
+def check_large_max_elements(lib, rng):
+    """max_elements beyond 2 * capacity (up to SIZE_MAX) means no limit."""
+    for _ in range(40):
+        bits = rng.choice([8, 16, 32, 64])
+        capacity = rng.randrange(1, 20)
+        c = CMinisketch(lib, bits, 0, capacity)
+        for _ in range(rng.randrange(0, capacity + 3)):
+            c.add(rng.randrange(1, 1 << bits))
+        expect = c.decode(2 * capacity)
+        # The library writes at most 2 * capacity elements, whatever the limit.
+        out = (ctypes.c_uint64 * (2 * capacity))()
+        for m in (2 * capacity + 1, 2**31 - 2, 2**31 - 1, 2**31, 2**32 + 1, 2**64 - 1):
+            ret = lib.minisketch_decode(c.ptr, m, out)
+            got = None if ret < 0 else sorted(out[i] for i in range(ret))
+            assert got == expect, f"decode(max_elements={m}) differs from decode({2 * capacity})"
+    print("large max_elements OK")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lib', required=True, help="path to libminisketch shared library")
@@ -236,6 +254,7 @@ def main():
         check_golden(lib, golden)
 
     check_capacity_functions(lib, rng)
+    check_large_max_elements(lib, rng)
 
     # Small capacities decode fast enough in pure Python; the C++ side is
     # fully random-tested elsewhere, this is about implementation agreement.

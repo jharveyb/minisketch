@@ -175,7 +175,9 @@ MINISKETCH_API size_t minisketch_merge(minisketch* sketch, const minisketch* oth
 /** Decode a sketch.
  *
  * `output` is a pointer to an array of `max_element` uint64_t's, which will be
- * filled with the elements in this sketch.
+ * filled with the elements in this sketch. At most 2 * capacity elements are
+ * ever written, so any max_elements of at least that means no limit (and
+ * only that many array entries are needed).
  *
  * The return value is the number of decoded elements, or -1 if decoding failed.
  */
