@@ -31,14 +31,13 @@ Remarks on the definition:
 
 - **Λ_L = 0.** The Python textbook decoder does not test this; it goes on
   to find the roots of f, which has the root 0 (f(0) = Λ_L). C37 says that
-  whenever BM returns Λ with L ≤ c and rev(Λ) splits into distinct linear
-  factors, Λ_L ≠ 0 (and the roots re-encode to the input). So for L ≤ c
-  such an f never splits, the Python decoder fails too, and the explicit
-  test changes nothing; it guarantees that 0 is never returned. C37's
-  status is `tested` (exhaustive on tiny fields, randomized and fuzzed
-  otherwise). With max_elements > c, BM can return L > c (up to 2c − 1),
-  which C37 does not cover; there the explicit test is part of the
-  definition. A port must return FAIL when Λ_L = 0.
+  whenever BM's Λ (of any length L) factors as Π(1 − αx) over nonzero α,
+  then |R| = L, so f = rev(Λ) has no root 0, and the roots re-encode to
+  the input. So a Λ with Λ_L = 0 never leads to a successful decode, the
+  Python decoder fails too, and the explicit test changes nothing; it
+  guarantees that 0 is never returned. C37 is proved in Lean for every L,
+  including L > c (possible when max_elements > c). A port must still
+  return FAIL when Λ_L = 0.
 - **Uniqueness.** When the input is the sketch of a set of at most c
   elements, the result is that set (C3, C5, C6), provided n_max ≥ its
   size. Exactly C(2^b − 1, i) of the 2^(bc) input vectors decode to i
@@ -162,5 +161,5 @@ C46 states that decode equals the textbook decoder. It decomposes into:
 - No zero root (C37).
 
 See [claims.md](claims.md) for the status of each (most are proved in Lean
-under `verification/`; C11, C37, C46 are tested, exhaustively on small
+under `verification/`; C11 and C46 are tested, exhaustively on small
 fields).

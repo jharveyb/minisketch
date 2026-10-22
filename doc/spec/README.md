@@ -159,11 +159,11 @@ Where the code and a document disagree, this spec follows the code.
   should return failure.
 - Whether the `CHECK_RETURN(current.back() != 0)` at the end of
   `BerlekampMasseyOdd` (a connection polynomial with Λ_L = 0) can trigger.
-  C37 (status `tested`) says a decode that would otherwise succeed never has
-  Λ_L = 0 when L ≤ c; a port should return failure in that case, as the C++
-  does. C37 does not cover L > c, which BM can return when the caller
-  passes `max_elements` > c; whether a decode with L > c can succeed (and
-  so whether the Λ_L test matters there) was not determined.
+  C37 (proved in Lean, for every BM length L) says a decode that would
+  otherwise succeed never has Λ_L = 0; a port should still return failure
+  in that case, as the C++ does. Whether the check can trigger at all
+  (BM ending with Λ_L = 0 on some input) was not determined; it is then
+  just a decode failure.
 - `minisketch_decode` converts `max_elements` to a C `int`; behaviour for
   `max_elements ≥ 2^31` is not specified by the API and is not specified
   here.
