@@ -82,14 +82,14 @@ trace K → GF(2).
 - status: proved
 
 ### C6: elements are the roots of rev(Λ)
-- statement: the roots of f = x^n Λ(1/x) are exactly the m ∈ M.
+- statement: for nonzero elements, the reversal of Λ = Π_{m∈M}(1 − m x) is f = Π_{m∈M}(x − m), whose roots are exactly the m ∈ M.
 - source: doc/math.md:106
 - kind: textbook
-- lean: Minisketch.Sketch.reverse_locator_roots
+- lean: Minisketch.Sketch.reverse_locator
 - oracle: Minisketch.decode
 - tests: TestFindRoots
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C7: field moduli
 - statement: each of the 63 moduli x^b + MOD (b = 2..64) in doc/moduli.md is irreducible over GF(2), and is the minimal-weight, lexicographically first such polynomial of degree b.

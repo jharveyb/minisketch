@@ -141,4 +141,28 @@ theorem eq_of_odd_psum_eq [DecidableEq K] [CharP K 2] {n : ℕ} (M M' : Finset K
     (h : ∀ j, j < n → psum M (2 * j + 1) = psum M' (2 * j + 1)) : M = M' :=
   eq_of_psum_eq M M' hM hM' h0 h0' (psum_eq_of_odd M M' h)
 
+open Polynomial in
+theorem reverse_one_sub (a : K) (ha : a ≠ 0) : (1 - C a * X : K[X]).reverse = X - C a := by
+  have hd : (1 - C a * X : K[X]).natDegree = 1 := by
+    rw [natDegree_sub_eq_right_of_natDegree_lt] <;> rw [natDegree_C_mul_X a ha]; simp
+  ext i
+  rw [reverse, hd, coeff_reflect]
+  rcases i with _ | _ | i
+  · rw [revAt_le (by norm_num)]; simp [coeff_X, coeff_C, coeff_one]
+  · rw [revAt_le (by norm_num)]; simp [coeff_X, coeff_C, coeff_one]
+  · rw [revAt_eq_self_of_lt (by omega)]
+    simp [coeff_X, coeff_one]
+
+open Polynomial in
+/-- C6: for nonzero elements, reversing the locator `Π_{m ∈ M} (1 - m x)` gives
+`Π_{m ∈ M} (x - m)`, whose roots are the elements themselves. -/
+theorem reverse_locator [DecidableEq K] (M : Finset K) (h0 : (0 : K) ∉ M) :
+    (∏ m ∈ M, (1 - C m * X)).reverse = ∏ m ∈ M, (X - C m) := by
+  induction M using Finset.induction_on with
+  | empty => simp [reverse]
+  | insert a M ha ih =>
+    rw [Finset.prod_insert ha, Finset.prod_insert ha, reverse_mul_of_domain,
+      ih fun h => h0 (Finset.mem_insert_of_mem h),
+      reverse_one_sub a fun h => h0 (h ▸ Finset.mem_insert_self a M)]
+
 end Minisketch.Sketch
