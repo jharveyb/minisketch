@@ -25,7 +25,7 @@ capacity/differences):
 | Karatsuba / FFT tail tiers | 4 | n ≥ 64 with c ≫ n | Karatsuba tail +12–22% at 4096–8192/128 (i7) |
 | additive FFT products, Barrett reducer | 3, 5 | n ≥ 704 (b ∈ {16,32,64}) | pre-lazy: 1.4–2.3× at 500–4096 full |
 | Montgomery orbit, carries, CosetDivide, power-sum splits | 5 | n ≥ 224, b ∈ {16,32,64} | 2.2–2.5× at 1024–4096, 50–100% full (32-bit: 1.5–1.8×) |
-| FastDivMod, half-gcd | 3 | degrees > 1024 / > 4096 | ~1.1× at 4096/4096 (before the lazy Euclid raised the cutoff); safe to omit |
+| FastDivMod | 3 | degrees > 1024 | small; safe to omit |
 
 ## Carry-less multiplication
 
@@ -80,7 +80,7 @@ chapter 1 are a few shifts and XORs on them.
 If a port keeps a table-based field, mirror the C++ distinctions (chapter
 7): the generic fields use Multiplier rows instead of lazy dot products,
 the square/Barrett reducer cutoff stays at 512, FFT tail checks start at
-L = 40, and FastDivMod, half-gcd and the whole Montgomery path are off
+L = 40, and FastDivMod and the whole Montgomery path are off
 (each measured slower there: the FFT's pointwise products are one-off
 multiplications). The BM builds one Multiplier per processed syndrome,
 only for the walked prefix.
@@ -110,7 +110,7 @@ Decode is at least quadratic in n (the serial BM part is O(n^2)), so many
 techniques are constant factors:
 
 - **Safe to omit** (constant factors, or never engaged at practical
-  sizes): half-gcd and FastDivMod (engage only above 4096 / 1024), cached
+  sizes): FastDivMod (engages only above degree 1024), cached
   reducer transforms, the inversion-free Euclid step, SmallTrace and
   TowerTraceSmall (use the general paths), batched add, the ARM
   shift-fold, PowerSumSplit (the gcd gives the same split at about twice

@@ -36,7 +36,7 @@
 #   CXXFLAGS_A, CXXFLAGS_B
 #              extra compiler flags for one side, appended to -g -O2. With
 #              both refs '.', this A/Bs a build-time knob within one tree,
-#              e.g. CXXFLAGS_B=-DMINISKETCH_HGCD_CUTOFF=2048 tools/bench_ab.sh . .
+#              e.g. CXXFLAGS_B=-DMINISKETCH_FAST_DIVMOD_CUTOFF=2048 tools/bench_ab.sh . .
 #   FIELDS     restrict the build to these field sizes (MINISKETCH_FIELDS,
 #              ';'-separated, e.g. "32;64"); must cover every bits value in
 #              CONFIGS. Cuts build time several-fold on slow machines.

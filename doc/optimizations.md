@@ -339,7 +339,14 @@ References:
 * Bernstein, *Multiplication of polynomials over F₂* survey
   (<https://cr.yp.to/f2mult.html>)
 
-## Implemented: subquadratic division and GCD
+## Implemented: subquadratic division (half-gcd evaluated, then removed)
+
+> **Status (2026-10):** `FastDivMod` is in the code. The half-gcd
+> (`FastGCD`, `HalfGCDMatrix`, `HGCD_CUTOFF`) described below was removed
+> after the measurement in "Half-gcd removed" at the end of this section:
+> it only runs for decodes of more than about 8192 elements and gains
+> 4–6% there. This section is kept as the record of how it was built and
+> evaluated.
 
 With the FFT tier and cached transforms in place, the quadratic
 `GCD(trace, poly)` (once per split attempt at every `RecFindRoots` node)
@@ -429,6 +436,36 @@ on 64-bit CLMUL**, 350 → 152 ms (2.31×) on 32-bit CLMUL.
   memory-traffic optimization, and divstep's data-independent shape if a
   constant-time decoder is ever required (no published
   divstep-over-GF(2<sup>m</sup>)[x] implementation appears to exist).
+
+### Half-gcd removed (2026-10)
+
+After the lazy-reduction series raised `HGCD_CUTOFF` to 4096, the
+half-gcd only engaged on operands longer than 4096. At full fill the gcd
+operands are the children of the top split (about half the capacity),
+and from node degree 256 the Montgomery path mostly splits by power sums
+instead of a gcd. An instrumented build counted the engagements over 8
+full-fill decodes: none at capacity 4096 or 6144, 8 at 8192 (largest
+operand ~4157), 8 at 12288, 20–23 at 16384.
+
+A pinned, interleaved A/B on CLMUL/PMULL (A = default, B =
+`-DMINISKETCH_HGCD_CUTOFF=1000000`, i.e. half-gcd off; median of per-round
+B/A, i7-4770 at 3.4 GHz with 9 rounds and Pi 5 at 2.4 GHz with 7 rounds):
+
+| capacity = elements | i7 32-bit | i7 64-bit | Pi 5 32-bit | Pi 5 64-bit |
+|---|---|---|---|---|
+| 2048–6144 (never engages) | 0.99–1.01 | 0.99–1.01 | 0.99–1.00 | 1.01–1.03 |
+| 8192 | 1.016 | 1.005 | 1.005 | 1.015 |
+| 12288 | 1.044 | 1.042 | 1.051 | 1.041 |
+| 16384 | 1.061 | 1.047 | 1.046 | 1.049 |
+
+So it was worth about 5% only for decodes of 12k or more elements (about
+0.6–1.4 s each), which are not a target use; the earlier 1.08×/1.14× at
+4096/4096 did not survive the later quadratic-loop speedups. It was
+removed: about 300 lines of matrix recursion and its tests, and its
+correctness argument (the truncation lemma) was the one large unproved
+claim in [spec/claims.md](spec/claims.md). If sketches that large become
+a target, the code is in git history (commit before "remove the
+half-gcd"), and the constant-factor ideas above are where to start.
 
 References: <https://arxiv.org/abs/2212.12389>,
 <https://eprint.iacr.org/2019/266>, <https://eprint.iacr.org/2024/644>,
@@ -583,7 +620,8 @@ The cheaper schoolbook primitives moved several crossovers:
 * Table/FFT reducer: 256 → 704 for CLMUL fields (~700 on Haswell, above
   768 on Cortex-A76).
 * `HGCD_CUTOFF`: 1024 → 4096; the lazy Euclid beats the half-gcd at every
-  degree up to 4096.
+  degree up to 4096. (The half-gcd was later removed; see "Half-gcd
+  removed".)
 * BM tail check: direct < 64 ≤ Karatsuba < 512 ≤ FFT on CLMUL fields;
   FFT from L ≥ 40 on generic fields.
 * Shared orbit: from root degree 8 (was 16).
@@ -924,7 +962,7 @@ reusing the carry's buffers measured no difference on x86-64.
   top quarter never touch it, and two dependence-free passes replace the
   sequential top-down division. Neutral end to end: the conversion is
   bound by its ~13 XORs per element at N = 2048, not by the dependences.
-* **Half-gcd with shared transforms.** The 2×2 matrix-vector and matrix
+* **Half-gcd with shared transforms** (half-gcd since removed). The 2×2 matrix-vector and matrix
   products now transform each distinct operand once (8 instead of 12, 12
   instead of 24 transforms), which made HGCD ~10% faster than the
   quadratic loop at 3072 but still a tie at 1024–1536. The cutoff stays

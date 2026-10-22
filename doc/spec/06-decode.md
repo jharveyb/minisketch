@@ -95,8 +95,8 @@ Decode
         ├─ split: PowerSumSplit (deg >= 256, Montgomery, sums known)
         │         ├─ SPLIT → children with power sums
         │         ├─ TRIVIAL → next depth
-        │         └─ GCD_FALLBACK → FastGCD
-        │         | FastGCD(t, g) (half-gcd above 4096 on FFT-capable CLMUL, else Euclid)
+        │         └─ GCD_FALLBACK → GCD
+        │         | GCD(t, g) (lazy, inversion-free Euclid)
         ├─ quotient: from PowerSumSplit | CosetDivide (Montgomery, deg >= 64) | FastDivMod
         ├─ carry to factors: MontCarryToFactor (deg > 16) | normal form (3..16)
         ├─ RecFindRoots(t = 1 factor, ff)        may FAIL

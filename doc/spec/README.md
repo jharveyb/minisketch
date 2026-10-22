@@ -58,7 +58,7 @@ conjunction of the claims cited in chapters 4–6, most of them proved in Lean
 |---|---|
 | [01-field.md](01-field.md) | GF(2^b): encoding, moduli, multiplication, CLMUL reduction, squaring, Qrt, inversion, lazy reduction |
 | [02-sketch.md](02-sketch.md) | Sketch contents, add, merge, serialization, seeds, implementations, capacity functions |
-| [03-polyarith.md](03-polyarith.md) | Polynomial arithmetic: Karatsuba, middle products, additive FFT, Newton inverse, division, gcd, half-gcd |
+| [03-polyarith.md](03-polyarith.md) | Polynomial arithmetic: Karatsuba, middle products, additive FFT, Newton inverse, division, gcd |
 | [04-bm.md](04-bm.md) | `BerlekampMasseyOdd`: odd steps only, early termination, exact tail check |
 | [05-roots.md](05-roots.md) | `FindRoots` / `RecFindRoots`: orbit, tower bases, coset Montgomery tree, power-sum splits, every fallback |
 | [06-decode.md](06-decode.md) | The decode pipeline, call graph, failure conditions, output order |
@@ -115,8 +115,8 @@ Where the code and a document disagree, this spec follows the code.
    the additive-FFT multiplication tier" gives
    `TRACEMOD_FFT_TABLE_CUTOFF = 256`; the code has 704 (the later "Lazy
    modular reduction" section records the 256 → 704 change). The section
-   "Implemented: subquadratic division and GCD" gives `HGCD_CUTOFF = 1024`;
-   the code has 4096 (marked as superseded in that section's "Remaining").
+   on subquadratic division gave `HGCD_CUTOFF = 1024`; the half-gcd has
+   since been removed.
 3. **Carried traces at N = 2048.** `doc/optimizations.md` ("The Montgomery
    remainder tree") says three relative traces are carried "up to
    N = 2048". The code (`src/sketch_impl.h:1673`) carries

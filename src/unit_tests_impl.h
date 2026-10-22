@@ -406,15 +406,14 @@ void TestTraceModReducers(const F& field, TestRand& rng, size_t iters) {
     }
 }
 
-/** Properties of the subquadratic division and gcd (FastDivMod, FastGCD):
- *  equivalence with the schoolbook DivMod and the quadratic GCD. A small
- *  explicit cutoff is passed so the reciprocal and half-gcd machinery is
- *  exercised with real recursion depth at reference-affordable degrees, on
- *  every field (its correctness does not depend on the field); the
- *  production cutoffs from FastDivModCutoff/FastGCDCutoff are far larger
- *  and are exercised by the decode-level tests. */
+/** FastDivMod (reciprocal-series division) is equivalent to the schoolbook
+ *  DivMod. A small explicit cutoff is passed so the reciprocal machinery is
+ *  exercised at reference-affordable degrees, on every field (its
+ *  correctness does not depend on the field); the production cutoff from
+ *  FastDivModCutoff is far larger and is exercised by the decode-level
+ *  tests. */
 template<typename F>
-void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
+void TestFastDivMod(const F& field, TestRand& rng, size_t iters) {
     typedef typename F::Elem Elem;
     const size_t maxdeg = 320;
     const size_t cutoff = 24;
@@ -439,70 +438,6 @@ void TestSubquadraticGCD(const F& field, TestRand& rng, size_t iters) {
             UT_REQUIRE(Stripped(rem2).empty());
             UT_REQUIRE(Stripped(q2) == Stripped(quot_in));
         }
-
-        // FastGCD == GCD for operands with a planted common factor.
-        auto f = RandPoly(rng, field, 1 + rng.RandRange(maxdeg));
-        auto g = RandPoly(rng, field, 1 + rng.RandRange(maxdeg / 2 + 1));
-        auto h = RandPoly(rng, field, 1 + rng.RandRange(maxdeg));
-        auto a = PolyMulRef(f, g, field);
-        auto b = PolyMulRef(h, g, field);
-        auto a_ref = a, b_ref = b, a_fast = a, b_fast = b;
-        GCD(a_ref, b_ref, field);
-        FastGCD(a_fast, b_fast, field, cutoff);
-        UT_REQUIRE(!a_ref.empty() && !a_fast.empty());
-        MakeMonic(a_ref, field);
-        MakeMonic(a_fast, field);
-        UT_REQUIRE(a_fast == a_ref);
-
-        // A remainder sequence built backwards with occasional large
-        // quotients: exercises the non-normal paths of the half-gcd (the
-        // internal division steps and the d2 recursion).
-        std::vector<Elem> r1 = RandPoly(rng, field, 1 + rng.RandRange(8));
-        std::vector<Elem> r0 = RandPoly(rng, field, r1.size() + 1 + rng.RandRange(8));
-        while (r0.size() <= maxdeg && !r0.empty()) {
-            size_t qdeg = 1 + (rng.RandRange(8) == 0 ? rng.RandRange(20) : 0);
-            auto q = RandPoly(rng, field, qdeg + 1);
-            if (q.empty() || q.back() == 0) continue;
-            auto next = PolyMulRef(q, r0, field);
-            for (size_t j = 0; j < r1.size(); ++j) next[j] ^= r1[j];
-            r1.swap(r0);
-            r0.swap(next);
-        }
-        if (!r0.empty() && !r1.empty()) {
-            auto na_ref = r0, nb_ref = r1, na_fast = r0, nb_fast = r1;
-            GCD(na_ref, nb_ref, field);
-            FastGCD(na_fast, nb_fast, field, cutoff);
-            UT_REQUIRE(!na_ref.empty() && !na_fast.empty());
-            MakeMonic(na_ref, field);
-            MakeMonic(na_fast, field);
-            UT_REQUIRE(na_fast == na_ref);
-        }
-    }
-
-    // Edge cases: empty side, identical operands, one dividing the other,
-    // and coprime pairs reducing to a constant.
-    auto a = RandPoly(rng, field, 150);
-    std::vector<Elem> empty_b;
-    auto a_copy = a;
-    FastGCD(a_copy, empty_b, field, cutoff);
-    UT_REQUIRE(Stripped(a_copy) == Stripped(a));
-
-    auto same1 = a, same2 = a;
-    FastGCD(same1, same2, field, cutoff);
-    auto want = a;
-    UT_REQUIRE(!want.empty());
-    MakeMonic(want, field);
-    MakeMonic(same1, field);
-    UT_REQUIRE(same1 == want);
-
-    auto factor = RandMonicPoly(rng, field, 140);
-    auto multiple = PolyMulRef(RandPoly(rng, field, 60), factor, field);
-    if (!multiple.empty()) {
-        auto ma = multiple, mb = factor;
-        FastGCD(ma, mb, field, cutoff);
-        UT_REQUIRE(!ma.empty());
-        MakeMonic(ma, field);
-        UT_REQUIRE(ma == factor);
     }
 }
 
@@ -1224,7 +1159,7 @@ void RunAllFieldTests(uint64_t seed_offset) {
     // FFT tier internally, so engine bugs are reported at their source.
     TestAdditiveFFT(field, rng, 24);
     TestTraceModReducers(field, rng, 24);
-    TestSubquadraticGCD(field, rng, 10);
+    TestFastDivMod(field, rng, 10);
     TestSyndromes(field, lowmod, rng, 128, 12);
     TestBerlekampMassey(field, rng, 128, 10);
     TestBerlekampMasseyVsRef(field, rng, 200, 160);

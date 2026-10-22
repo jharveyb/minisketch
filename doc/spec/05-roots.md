@@ -418,7 +418,7 @@ RecFindRoots(g, ff, depth, randv, orbit, orbit_degree, betas, carry, psum):
             r = PowerSumSplit(g, values of g on the node coset, t, psum)
             if r == SPLIT: (g0, g1) = its factors; break
             if r == TRIVIAL: continue
-        h = FastGCD(t, g)
+        h = GCD(t, g)                        # chapter 3, Euclid
         if 1 <= deg h < d: g0 = h; break
     # 5. factors: g0 holds the roots with trace 0, g1 the rest
     if not psum split:

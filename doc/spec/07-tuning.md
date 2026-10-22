@@ -22,7 +22,7 @@ Two properties of the field select tiers:
 | additive-FFT products (`fft_eligible`) | - | yes | - | yes |
 | square-table / reciprocal reducer cutoff | 512 | 512 | 512 | 704 |
 | cached reducer transforms | - | yes | - | yes |
-| FastDivMod, FastGCD (half-gcd) | - | - | - | yes |
+| FastDivMod | - | - | - | yes |
 | lazy dot products, inversion-free Euclid | - | - | yes | yes |
 | BM tail: direct / Karatsuba / FFT | table direct | table < 40 ≤ FFT | direct < 64 ≤ Karatsuba < 512 ≤ Karatsuba blocks | direct < 64 ≤ Karatsuba < 512 ≤ FFT |
 | shared orbit, tower betas (8 ∣ b) | yes | yes | yes | yes |
@@ -35,13 +35,11 @@ Two properties of the field select tiers:
 
 | macro | default | selects | trade-off | hardware |
 |---|---|---|---|---|
-| `TRACEMOD_POLYMUL_CUTOFF` | 24 | Karatsuba recursion bottoms out in schoolbook when n ≤ 24 or min operand length ≤ 24; FFT products and the half-gcd's shared transforms also require operands longer than 24 | recursion overhead vs d^2 | not stated |
+| `TRACEMOD_POLYMUL_CUTOFF` | 24 | Karatsuba recursion bottoms out in schoolbook when n ≤ 24 or min operand length ≤ 24; FFT products also require operands longer than 24 | recursion overhead vs d^2 | not stated |
 | `TRACEMOD_TABLE_CUTOFF` | 512 | TraceMod: square table for node degree < 512, reciprocal (Barrett) reducer above; for generic and non-FFT-capable fields | table d^2/2 elements, streamed, vs Barrett products | optimizations.md: generic fields regressed 10–25% with a lower value |
 | `TRACEMOD_FFT_TABLE_CUTOFF` | 704 | the same cutoff for FFT-capable cheap fields | the lazy streaming table beats the FFT reducer up to here | "~700 on Haswell, above 768 on Cortex-A76" |
-| `TRACEMOD_FFT_CUTOFF` | 128 | minimum product length for the additive-FFT tier; TraceMod caches node transforms when 2d − 1 ≥ 128; half-gcd shared transforms | transform setup vs Karatsuba | optimizations.md: "nearly flat in 64..512" |
+| `TRACEMOD_FFT_CUTOFF` | 128 | minimum product length for the additive-FFT tier; TraceMod caches node transforms when 2d − 1 ≥ 128 | transform setup vs Karatsuba | optimizations.md: "nearly flat in 64..512" |
 | `FAST_DIVMOD_CUTOFF` | 1024 | FastDivMod uses the reciprocal method when min(quotient length, divisor degree) > 1024 (FFT-capable cheap fields only) | Newton inverse + 2 FFT products vs lazy schoolbook | optimizations.md (pre-lazy measurements) |
-| `HGCD_CUTOFF` | 4096 | FastGCD uses half-gcd while the smaller operand is longer than 4096 (FFT-capable cheap fields only) | matrix machinery vs lazy Euclid | "i7-4770 and a Pi 5" (lazy Euclid wins at every degree ≤ 4096) |
-| `HGCD_ITER_CROSSOVER` | 24 | HalfGCDMatrix switches to iterative steps when d_red ≤ 24 | recursion vs direct steps | not stated |
 | `GCD_INVFREE_MAX` | 128 | lazy Euclid uses the inversion-free pseudo-remainder for normal steps with divisor degree < 128 | one extra product per coefficient vs one inversion | not stated |
 | `DIVMOD_LAZY_MIN` | 4 | DivMod and GCD use lazy dot-product division when the divisor has more than 4 coefficients (CLMUL) | | not stated |
 | `SMALL_TRACE_MAX` | 8 | nodes of degree ≤ 8 on fully factorizable paths use SmallTrace | TraceMod setup vs d^2/2 products | not stated |

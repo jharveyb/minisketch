@@ -320,56 +320,13 @@ The loop runs while deg b ≥ 1. If it ends with b a nonzero constant the
 inputs are coprime (result 1); otherwise the last divisor a is made monic
 once (only if at least one division happened).
 
-### Half-gcd: `FastGCD` (`src/sketch_impl.h:990`)
+### No half-gcd
 
-Used for operands longer than `FastGCDCutoff` (4096 on FFT-capable cheap
-fields, ∞ otherwise), so in practice only for root degrees above 4096 on
-b ∈ {16, 32, 64} CLMUL. Classical recursive half-gcd, gcd only (no Bezout
-coefficients):
-
-```
-FastGCD(a, b, cutoff):
-    strip a, b; if |a| < |b|: swap
-    while b nonempty and |b| > cutoff:
-        d_red = ceil(deg a / 2)                    # (deg a + 1) / 2
-        if |b| == |a| or deg b + d_red <= deg a:
-            make b monic; a = a mod b (FastDivMod); swap(a, b); continue
-        M = HalfGCDMatrix(a, b, d_red)
-        (a, b) = M · (a, b)                        # now deg b <= deg a_old - d_red
-    return GCD(a, b)
-```
-
-`HalfGCDMatrix(u, v, d_red)` (requires deg u > deg v) returns the 2×2
-polynomial matrix M of the Euclidean remainder sequence of (u, v) up to the
-first pair (u', v') with deg v' ≤ deg u − d_red. It depends only on the
-top 2·d_red − 1 coefficients of u and v (the truncation lemma, C39g):
-
-```
-HalfGCDMatrix(u, v, d_red):
-    if v empty or deg v + d_red <= deg u: return I
-    shift = deg u - (2 d_red - 2) if deg u >= 2 d_red - 2 else 0
-    u, v = u[shift:], v[shift:]                 # du = deg u after the shift
-    if d_red <= 24:                             # HGCD_ITER_CROSSOVER
-        return IterHalfGCD(u, v, stop_deg = du - d_red)
-    d1 = ceil(d_red / 2)
-    M1 = HalfGCDMatrix(u, v, d1); (u, v) = M1·(u, v)
-    if v empty or deg v + d_red <= du: return M1
-    q, r = divmod(u, v)  (non-monic divisor); (u, v) = (v, r); M1 = step(M1, q)
-    if v empty or deg v + d_red <= du: return M1
-    d2 = deg u + d_red - du
-    M2 = HalfGCDMatrix(u, v, d2)
-    return M2 · M1
-```
-
-`IterHalfGCD` runs Euclid steps (`DivModNonMonic`: schoolbook with the
-inverse leading coefficient) while deg v > stop_deg, accumulating M.
-`step(M, q)` maps rows (m0, m1) to (m1, m0 + q·m1), the matrix of
-(u, v) → (v, u − q·v) in characteristic 2. Matrix-vector and
-matrix-matrix products transform each distinct operand once and form each
-entry with one interpolation (`PolyMat22FFT`, `PolyDot2FromFFT`: 6 + 2
-instead of 12 transforms, 8 + 4 instead of 24) when the field is
-FFT-capable and cheap, the longest product is ≥ 128, every operand is
-longer than 24 and the dimension fits b; otherwise four Karatsuba products.
+libminisketch uses only the quadratic `GCD` above. A recursive half-gcd
+was implemented and removed: at full fill it only engaged for decodes of
+more than about 8192 elements and gained 4–6% there
+(`doc/optimizations.md`, "Half-gcd removed"). A port need not implement
+one.
 
 ## Batch inversion
 

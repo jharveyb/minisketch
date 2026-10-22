@@ -272,9 +272,9 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
         }
     }
 
-    // Subquadratic division and gcd against their quadratic references, at
-    // sizes crossing FAST_DIVMOD_CUTOFF and HGCD_CUTOFF. Appended last to
-    // keep the input layout of everything above stable.
+    // Reciprocal-series division against schoolbook DivMod, with a small
+    // cutoff so the fast path runs. Appended last to keep the input layout of
+    // everything above stable.
     if (bits == 32 && provider.ConsumeBool()) {
         auto mod = ConsumeMonicPoly(provider, field, 2, 192);
         auto val = ConsumePoly(provider, field, 380);
@@ -283,21 +283,6 @@ void PolyOpsForField(FuzzedDataProvider& provider, const F& field) {
         FastDivMod(mod, rem_fast, q_fast, field, 24);
         FUZZ_CHECK(q_fast == q_ref);
         FUZZ_CHECK(rem_fast == rem_ref);
-
-        auto fg = ConsumePoly(provider, field, 48);
-        auto fa2 = ConsumePoly(provider, field, 160);
-        auto fb2 = ConsumePoly(provider, field, 160);
-        if (!fg.empty() && !fa2.empty() && !fb2.empty()) {
-            auto a = ut::PolyMulRef(fa2, fg, field);
-            auto b = ut::PolyMulRef(fb2, fg, field);
-            auto a_ref = a, b_ref = b, a_fast = a, b_fast = b;
-            GCD(a_ref, b_ref, field);
-            FastGCD(a_fast, b_fast, field, 24);
-            FUZZ_CHECK(!a_ref.empty() && !a_fast.empty());
-            MakeMonic(a_ref, field);
-            MakeMonic(a_fast, field);
-            FUZZ_CHECK(a_fast == a_ref);
-        }
     }
 }
 

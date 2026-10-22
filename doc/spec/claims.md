@@ -433,12 +433,12 @@ trace K → GF(2).
 - status: proved
 
 ### C39: polynomial arithmetic primitives
-- statement: (a) S^i(x) = Σ_{j: C(i,j) odd} x^{2^j}; (b) the LCH additive FFT evaluates at η_0..η_{2^m−1} in index order; (c) char-2 Karatsuba; (d) Newton inverse series g' = f g^2 mod x^{2m}; (e) the inversion-free pseudo-remainder equals β^2·(a mod b); (f) carry-less reduction is GF(2)-linear, so Σ reduce(a_i b_i) = reduce(Σ a_i b_i); (g) the half-gcd matrix depends only on the top 2·d − 1 coefficients.
-- source: src/additive_fft.h, src/sketch_impl.h:447, src/sketch_impl.h:636, src/sketch_impl.h:266, src/sketch_impl.h:923, doc/optimizations.md:356
-- kind: textbook (a–d, f, g), novel application (e)
+- statement: (a) S^i(x) = Σ_{j: C(i,j) odd} x^{2^j}; (b) the LCH additive FFT evaluates at η_0..η_{2^m−1} in index order; (c) char-2 Karatsuba; (d) Newton inverse series g' = f g^2 mod x^{2m}; (e) the inversion-free pseudo-remainder equals β^2·(a mod b); (f) carry-less reduction is GF(2)-linear, so Σ reduce(a_i b_i) = reduce(Σ a_i b_i). (A half-gcd, whose truncation lemma was part (g), was removed from the library.)
+- source: src/additive_fft.h, src/sketch_impl.h:447, src/sketch_impl.h:636, src/sketch_impl.h:266, doc/optimizations.md:356
+- kind: textbook (a–d, f), novel application (e)
 - lean: Minisketch.PolyArith.primitives
 - oracle: additive_fft
-- tests: TestAdditiveFFT, TestTraceModReducers, TestSubquadraticGCD
+- tests: TestAdditiveFFT, TestTraceModReducers, TestFastDivMod
 - spec: 03-polyarith
 - status: tested
 
