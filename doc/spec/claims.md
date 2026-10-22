@@ -145,14 +145,14 @@ trace K → GF(2).
 ## Berlekamp–Massey
 
 ### C12: even discrepancies vanish
-- statement: for any sequence with s_{2k} = s_k^2 (not only true sketches), the BM discrepancy at every even step is 0, so BM on the odd steps only gives the same result as full BM.
+- statement: for any sequence with s_{2k} = s_k^2 (not only true sketches), the textbook BM discrepancy at every even position is 0, so BM on the odd steps only gives the same result as full BM. Proof: BM's iterates satisfy the binary key equation Λ·S ≡ Λ_odd (mod x^{n+1}) (Λ_odd = xΛ′, its odd part), carried through every update because length changes only happen at odd positions, so the shift m is even; at an even position 2k it makes the discrepancy [Λ_odd·Λ_even]_{2k}, which is 0 (odd times even series has only odd exponents).
 - source: doc/optimizations.md:453, doc/decode_explained.md:38, src/sketch_impl.h:2594
 - kind: textbook (Berlekamp 1968), relied on for arbitrary inputs
-- lean: Minisketch.BM.even_discrepancy_zero
+- lean: Minisketch.BMEven.even_discrepancy_zero
 - oracle: bm_odd
 - tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2)
 - spec: 04-bm
-- status: tested
+- status: proved
 
 ### C13: tail identity
 - statement: for a sequence with s_{2k} = s_k^2, S = S_odd + S^2 as power series (the even part is Σ s_k^2 x^{2k} = S(x)^2). Hence for C = Λ·S: Λ·C = C^2 + Λ^2·S_odd.
@@ -188,12 +188,12 @@ trace K → GF(2).
 - statement: BerlekampMasseyOdd with early termination and the bulk tail check returns exactly what textbook BM over all 2c syndromes returns, including the max_degree failure. Follows from C12 and C15: once the check passes, every remaining discrepancy is 0, and BM makes no update on a zero discrepancy; a failing check resumes BM where it stopped.
 - source: doc/optimizations.md:465, src/sketch_impl.h:2623
 - kind: novel
-- lean: Minisketch.BM.bm_odd_early_eq_bm
+- lean: Minisketch.BMEven.bm_odd_early_eq_bm, Minisketch.BMEven.bm_stable
 - depends: C12, C15
 - oracle: bm_odd
 - tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2)
 - spec: 04-bm
-- status: tested
+- status: proved
 
 ### C16: odd syndromes are a Λ^2 recurrence
 - statement: u_j = s_{2j+1} = Σ_m m·(m^2)^j, so u satisfies the LFSR with connection polynomial Λ^{(2)} (each coefficient squared) whose roots are the m^2.

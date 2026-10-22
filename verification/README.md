@@ -37,6 +37,7 @@ One module per area, matching the sections of the registry:
 | `Minisketch/Sketch.lean` | power sums: linearity, Frobenius halving, uniqueness (C1, C3, C4) |
 | `Minisketch/BM.lean` | executable textbook BM model; Massey's lemma; BM returns a shortest LFSR (C5) |
 | `Minisketch/BMPowerSum.lean` | a set's locator generates its power sums, so BM on them has length ≤ the set size (C35's minimality hypothesis) |
+| `Minisketch/BMEven.lean` | even BM discrepancies vanish on Frobenius sequences (C12); early termination with the odd-only tail check returns textbook BM's result (C48) |
 | `Minisketch/BMTail.lean` | BM tail identity, even/odd discrepancy recurrences, exactness of the odd-only tail check (C13–C15) |
 | `Minisketch/Trace.lean` | trace splitting, fail-fast test, gcd side stays in GF(2^b), shared orbit, full-split test, relative trace (C20–C23, C26, C28) |
 | `Minisketch/PowerSumSplit.lean` | power-sum split formula, uniqueness of the BM-recovered side, empty side, complement (C35) |
