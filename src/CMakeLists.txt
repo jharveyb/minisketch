@@ -106,6 +106,21 @@ if(MINISKETCH_BUILD_TESTS)
       COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/tests/differential.py
         --lib $<TARGET_FILE:minisketch-testlib>
     )
+
+    # Conformance test: the decoder's internal stage outputs (dumped by
+    # oracle-dump, which compiles the field sources directly like unit-tests)
+    # against the optimized-decode oracle in tests/pyminisketch.py, including
+    # the high-capacity tiers the differential test never reaches.
+    add_executable(oracle-dump oracle_dump.cpp oracle_dump_clmul.cpp)
+    target_compile_definitions(oracle-dump PRIVATE MINISKETCH_VERIFY MINISKETCH_STAGE_STATS)
+    if(HAVE_CLMUL)
+      set_property(SOURCE oracle_dump_clmul.cpp PROPERTY COMPILE_OPTIONS ${CLMUL_CXXFLAGS})
+      set_property(SOURCE oracle_dump.cpp oracle_dump_clmul.cpp APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CLMUL)
+    endif()
+    add_test(NAME ${PROJECT_NAME}_conformance
+      COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/tests/conformance.py
+        --dump $<TARGET_FILE:oracle-dump>
+    )
     # Claim registry consistency (doc/spec/claims.md vs the oracle); the Lean
     # half needs the verification/ project and runs separately.
     add_test(NAME ${PROJECT_NAME}_claims

@@ -112,8 +112,6 @@
 #ifndef MINISKETCH_SMALL_CARRY_MAX
 #define MINISKETCH_SMALL_CARRY_MAX 16
 #endif
-/* Node degree from which Montgomery-form split traces are normalized
- * before the gcd (MontTowerTrace). */
 /* Node degree from which Montgomery-form nodes divide out a split factor
  * pointwise on their coset instead of by long division. */
 #ifndef MINISKETCH_COSET_DIV_MIN
@@ -124,6 +122,8 @@
 #ifndef MINISKETCH_PSUM_SPLIT_MIN
 #define MINISKETCH_PSUM_SPLIT_MIN 256
 #endif
+/* Node degree from which Montgomery-form split traces are normalized
+ * before the gcd (MontTowerTrace). */
 #ifndef MINISKETCH_MONT_NORMALIZE_MIN
 #define MINISKETCH_MONT_NORMALIZE_MIN 512
 #endif
@@ -1832,6 +1832,7 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
         MontTree<F>& mtree = (tree && carry) ? *tree : local_tree;
         MontCarry<F>& mcarry = (tree && carry) ? *carry : local_carry;
         int res = MontgomeryOrbit(poly, basis, field, traces[0], mtree.fft, mcarry);
+        MINISKETCH_STAT(res == 1 ? "mont-orbit" : res == 0 ? "mont-orbit-not-split" : "mont-orbit-no-coset");
         if (res == 0) return false;
         if (res == 1) {
             betas.swap(mbetas);
@@ -2250,6 +2251,7 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
                 MINISKETCH_COZ_BEGIN("findroots-psum");
                 MontCoset<F>& mc = get_node_mc();
                 int r = PowerSumSplit(carry->tree->fft, mc, poly, mc.Values(), trace, *psum, ps_g0, ps_g1, trace_v, tmp_v, psum0, psum1, field);
+                MINISKETCH_STAT(r == 1 ? "psum-split" : r == 0 ? "psum-split-trivial" : "psum-split-fallback");
                 MINISKETCH_COZ_END("findroots-psum");
                 if (r == 1) {
                     psum_split = true;
@@ -2274,6 +2276,7 @@ bool RecFindRoots(std::vector<std::vector<typename F::Elem>>& stack, size_t pos,
         // there (trace has no root on the coset, as a factor of the root
         // polynomial), one interpolation instead of a long division; the
         // values also seed both factors' carries.
+        MINISKETCH_STAT("coset-divide");
         MakeMonic(trace, field);
         MontCoset<F>& mc = get_node_mc();
         bool ok = CosetDivide(carry->tree->fft, mc, mc.Values(), node_degree, trace, trace_v, tmp, tmp_v, field);
@@ -2467,6 +2470,7 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
     std::vector<Elem> conn2(L + 1);
     for (size_t a = 0; a <= L; ++a) conn2[a] = field.Sqr(conn[a]);
     if (F::LAZY_REDUCE && L >= BM_VERIFY_KARA_MIN_DEGREE && L < BM_VERIFY_FFT_MIN_DEGREE) {
+        MINISKETCH_STAT("bm-verify-kara");
         // Blocks of n positions as lazy Karatsuba middle products of the
         // reversed, zero-padded conn^2 with windows of u, where
         // n = b * 2^k >= L+1 with b <= MP_BASE (so the recursion halves
@@ -2503,6 +2507,7 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
         return true;
     }
     if (F::LAZY_REDUCE && L < BM_VERIFY_FFT_MIN_DEGREE) {
+        MINISKETCH_STAT("bm-verify-lazy");
         // Four positions at a time, so every coefficient load feeds four
         // accumulators.
         typedef typename F::Wide Wide;
@@ -2528,6 +2533,7 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
     }
     const bool use_fft = TraceModFFTCapable(field) && L >= (TraceModCheapScalarMul<F>() ? BM_VERIFY_FFT_MIN_DEGREE : BM_VERIFY_FFT_MIN_DEGREE_TABLE);
     if (!F::LAZY_REDUCE && !use_fft) {
+        MINISKETCH_STAT("bm-verify-table");
         // Table-based fields: one Multiplier per coefficient for the whole
         // tail (instead of per block), applied coefficient by coefficient
         // to L1-sized blocks of positions so each table stays hot.
@@ -2562,6 +2568,7 @@ bool BerlekampMasseyVerifyTail(const std::vector<typename F::Elem>& conn, const 
         if (fft_m > field.Bits()) fft_m = 0;
     }
     block = fft_m ? (size_t(1) << fft_m) - 2 * L : std::max<size_t>(2 * L, 64);
+    MINISKETCH_STAT(fft_m ? "bm-verify-fft" : "bm-verify-polymul");
 
     TraceModScratch<F> scratch;
     std::vector<Elem> win, prod, conn2_fft;
@@ -2682,7 +2689,11 @@ std::vector<typename F::Elem> BerlekampMasseyOdd(const std::vector<typename F::E
             size_t done = n + 1;
             size_t L = current.size() - 1;
             if (done >= next_verify && done >= 2 * L + BM_VERIFY_GAP && n_syn - done >= BM_VERIFY_MIN_TAIL) {
-                if (BerlekampMasseyVerifyTail(current, osyn, n / 2 + 1, (n_syn + 1) / 2, field)) break;
+                if (BerlekampMasseyVerifyTail(current, osyn, n / 2 + 1, (n_syn + 1) / 2, field)) {
+                    MINISKETCH_STAT("bm-early-stop");
+                    break;
+                }
+                MINISKETCH_STAT("bm-verify-rejected");
                 next_verify = done + done / 2;
             }
         }

@@ -62,6 +62,16 @@ struct MinisketchStageTimes {
 #define MINISKETCH_COZ_END(name)
 #endif
 
+/* Stage counters for tests (src/oracle_dump.cpp), recording which decoder
+ * tier ran. Compiled out unless MINISKETCH_STAGE_STATS is defined, in which
+ * case the program provides MinisketchStageStat. */
+#ifdef MINISKETCH_STAGE_STATS
+void MinisketchStageStat(const char* name);
+#define MINISKETCH_STAT(name) MinisketchStageStat(name)
+#else
+#define MINISKETCH_STAT(name) do {} while (0)
+#endif
+
 /* Keep large cold functions out of their callers (instantiating them inline
  * inside a hot recursion measurably hurts its code locality). */
 #if defined(__GNUC__)
