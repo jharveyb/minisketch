@@ -457,7 +457,7 @@ trace K → GF(2).
 - kind: novel (implementation)
 - lean: -
 - oracle: GF2Ops
-- tests: TestFieldOps (exhaustive for b ≤ 8, random above), tests/differential.py and tests/conformance.py (clmul vs generic vs Python), fuzz roundtrip
+- tests: TestFieldOps: every pair of basis elements (x^i, x^j) for every field and implementation, plus Reduce(MulWide) on the lazy path; since the implementation is GF(2)-bilinear this checks multiplication for all inputs (exhaustive pairs for b ≤ 8 as well); tests/differential.py and tests/conformance.py (clmul vs generic vs Python); fuzz roundtrip
 - spec: 01-field
 - status: tested
 

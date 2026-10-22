@@ -100,6 +100,20 @@ void TestFieldOps(const F& field, uint64_t lowmod, TestRand& rng, size_t iters) 
         for (size_t i = 0; i < iters; ++i) {
             CheckFieldElem(field, lowmod, rng.RandBits(bits), rng.RandBits(bits));
         }
+        // All pairs of basis elements x^i, x^j. Every multiplier here (shift-and-add,
+        // and carry-less multiply followed by the fold reduction) is GF(2)-bilinear,
+        // so agreeing with the reference on a basis means agreeing everywhere: this
+        // checks Mul, and the reduction recipes, completely (claims C47, C49).
+        for (int i = 0; i < bits; ++i) {
+            for (int j = 0; j < bits; ++j) {
+                CheckFieldElem(field, lowmod, uint64_t{1} << i, uint64_t{1} << j);
+                if constexpr (F::LAZY_REDUCE) {
+                    typedef typename F::Elem Elem;
+                    UT_REQUIRE(field.Reduce(field.MulWide(Elem(uint64_t{1} << i), Elem(uint64_t{1} << j))) ==
+                               field.Mul(Elem(uint64_t{1} << i), Elem(uint64_t{1} << j)));
+                }
+            }
+        }
         // Edge cases.
         uint64_t max_elem = bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1;
         for (uint64_t a : {uint64_t{0}, uint64_t{1}, uint64_t{2}, max_elem}) {
