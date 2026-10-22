@@ -179,6 +179,8 @@ template<typename I, int BITS, I MOD> NO_SANITIZE_MEMORY I MulWithClMulReduce(I 
 template<typename I, int BITS, int POS> NO_SANITIZE_MEMORY I ReduceTrinomial(Clmul128 product)
 {
     static constexpr I MASK = Mask<BITS, I>();
+    // The second fold's output (degree <= 2*POS-2) must already be reduced.
+    static_assert(POS < BITS && 2 * POS - 2 < BITS, "trinomial needs two folds at most");
 
     if (BITS <= 32) {
         Clmul128 high1 = ClmulSrliEpi64<BITS>(product);
@@ -192,11 +194,13 @@ template<typename I, int BITS, int POS> NO_SANITIZE_MEMORY I ReduceTrinomial(Clm
         }
     } else {
         Clmul128 high1 = ClmulOr(ClmulSrliEpi64<BITS>(product), ClmulSrliBytes<8>(ClmulSlliEpi64<64 - BITS>(product)));
-        if (BITS + POS <= 66) {
+        // high1 has degree <= BITS-2, so the 64-bit lane shift by POS keeps
+        // every bit only while BITS + POS <= 65.
+        if (BITS + POS <= 65) {
             Clmul128 red1 = ClmulXor(high1, ClmulSlliEpi64<POS>(high1));
             if (POS == 1) {
                 return ClmulExtract64(ClmulXor(product, red1)) & MASK;
-            } else if (BITS + POS <= 66) {
+            } else {
                 Clmul128 high2 = ClmulSrliEpi64<BITS>(red1);
                 Clmul128 red2 = ClmulXor(high2, ClmulSlliEpi64<POS>(high2));
                 return ClmulExtract64(ClmulXor(ClmulXor(product, red1), red2)) & MASK;

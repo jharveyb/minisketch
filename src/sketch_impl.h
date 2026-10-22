@@ -95,8 +95,6 @@
 #ifndef MINISKETCH_MONT_ORBIT_MIN_DEGREE
 #define MINISKETCH_MONT_ORBIT_MIN_DEGREE 224
 #endif
-/* Node degree up to which the root-finding tree carries the relative
- * traces in normal form instead of Montgomery form (MontCarry). */
 /* Subfield degree of the Montgomery tree's tower split parameters: each
  * carried relative trace serves this many depths, at this many minus one
  * modular squarings per node (1, 2, 4 or 8). */
@@ -109,6 +107,8 @@
 #ifndef MINISKETCH_CARRY_DEPTH_MARGIN
 #define MINISKETCH_CARRY_DEPTH_MARGIN 2
 #endif
+/* Node degree up to which the root-finding tree carries the relative
+ * traces in normal form instead of Montgomery form (MontCarry). */
 #ifndef MINISKETCH_SMALL_CARRY_MAX
 #define MINISKETCH_SMALL_CARRY_MAX 16
 #endif
@@ -2809,14 +2809,6 @@ void AddToOddSyndromesBatch8(std::vector<typename F::Elem>& osyndromes,
         d6 = mul6(d6);
         d7 = mul7(d7);
     }
-}
-
-template<typename F>
-std::vector<typename F::Elem> FullDecode(const std::vector<typename F::Elem>& osyndromes, const F& field) {
-    auto asyndromes = ReconstructAllSyndromes<typename F::Elem>(osyndromes, field);
-    auto poly = BerlekampMassey(asyndromes, field);
-    std::reverse(poly.begin(), poly.end());
-    return FindRoots(poly, field);
 }
 
 template<typename F>
