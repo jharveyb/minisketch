@@ -390,14 +390,15 @@ trace K → GF(2).
 - status: open
 
 ### C35: power-sum split
-- statement: for t with t(α) ∈ {0,1} at every root α of g and A = {α : t(α) = 1}: P_k = Σ_α t(α)α^k = Σ_j t_j Q_{j+k}, and P_{2k} = P_k^2. If BM on P_1..P_{2M} (2M ≥ deg g) returns a polynomial that passes CosetDivide against g, it is Π_{α∈A}(x − α), so the inherited power sums are correct; a BM result of length 1 means A = ∅. (Proof sketch: a wrong answer B' ⊆ roots(g) would give A Δ B' ⊆ roots(g), |A Δ B'| ≤ deg g ≤ 2M with all power sums zero, contradicting C3.)
+- statement: for t with t(α) ∈ {0,1} at every root α of g (root set R, 0 ∉ R) and A = {α : t(α) = 1}: (a) P_k = Σ_α t(α)α^k = Σ_j t_j Q_{j+k}, so P_{2k} = P_k^2; (b) if |R| ≤ 2M and BM on P_1..P_{2M} returns a polynomial whose reversal f_B = Π_{β∈B}(x − β) divides g (so B ⊆ R; this is what CosetDivide certifies), then B = A, so the children inherit correct power sums. The proof needs BM's minimality (C5: |B| ≤ |A|, since Λ_A also generates P): divisibility alone does not exclude a superset of A. Then Σ_{α∈A∖B} α^m f_B(α) = 0 for m = 1..2M−|B| ≥ |A∖B| forces A ⊆ B (weighted Vandermonde). (c) A BM result of length 1 means A = ∅. (d) The other side has power sums Q_k − P_k.
 - source: src/sketch_impl.h:1994, doc/optimizations.md:822, doc/math_decode.md:59
 - kind: novel
-- lean: Minisketch.PowerSumSplit.split_correct
+- lean: Minisketch.PowerSumSplit.side_unique
+- depends: C5
 - oracle: power_sum_split (planned)
 - tests: TestFindRootsMontgomery (intact and corrupted sums)
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C36: Montgomery full-split test
 - statement: X_b ≡ x mod f iff the Montgomery forms of X_b and x agree on C, given deg f ≤ N (the difference has degree < N and N zeros).

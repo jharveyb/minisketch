@@ -69,6 +69,34 @@ theorem exists_psum_ne_zero (D : Finset K) (hD : D.Nonempty) (h0 : (0 : K) ∉ D
   have h0' : f ⟨0, hpos⟩ = 0 := congrFun hz _
   exact h0 (h0' ▸ (e ⟨0, hpos⟩).2)
 
+/-- Weighted form of C3: if `Σ_{α ∈ D} w(α) α^k = 0` for `k = 1..|D|`, with `D`
+a set of nonzero elements, then `w` vanishes on `D`. -/
+theorem weight_eq_zero_of_sum_pow (D : Finset K) (h0 : (0 : K) ∉ D) (w : K → K)
+    (h : ∀ k, 1 ≤ k → k ≤ D.card → ∑ α ∈ D, w α * α ^ k = 0) : ∀ α ∈ D, w α = 0 := by
+  set n := D.card
+  let e : Fin n ≃ D := D.equivFin.symm
+  let f : Fin n → K := fun j => (e j : K)
+  have hf : Function.Injective f := fun a b h => e.injective (Subtype.ext h)
+  have hw : (Matrix.vandermonde f).transpose.mulVec (fun j => w (f j) * f j) = 0 := by
+    funext i
+    simp only [Matrix.mulVec, dotProduct, Matrix.transpose_apply, Matrix.vandermonde_apply,
+      Pi.zero_apply]
+    have hsum : ∑ j, f j ^ (i : ℕ) * (w (f j) * f j) = ∑ α ∈ D, w α * α ^ ((i : ℕ) + 1) := by
+      rw [← Finset.sum_coe_sort D, ← e.sum_comp]
+      exact Finset.sum_congr rfl fun j _ => by rw [pow_succ]; ring
+    rw [hsum]
+    exact h (i + 1) (by omega) (by omega)
+  have hdet : (Matrix.vandermonde f).transpose.det ≠ 0 := by
+    rw [Matrix.det_transpose]
+    exact Matrix.det_vandermonde_ne_zero_iff.mpr hf
+  have hz := Matrix.eq_zero_of_mulVec_eq_zero hdet hw
+  intro α hα
+  have hj := congrFun hz (e.symm ⟨α, hα⟩)
+  simp only [f, Equiv.apply_symm_apply, Pi.zero_apply] at hj
+  rcases mul_eq_zero.mp hj with h1 | h1
+  · exact h1
+  · exact absurd (h1 ▸ hα) h0
+
 /-- C3: the power sums `s_1..s_{2n}` determine a set of at most `n` nonzero
 elements. -/
 theorem eq_of_psum_eq [DecidableEq K] [CharP K 2] {n : ℕ} (M M' : Finset K)
