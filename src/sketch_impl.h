@@ -18,7 +18,8 @@
 
 /* Algorithm crossover cutoffs. Each can be overridden at build time with
  * -DMINISKETCH_<NAME>=<value> (e.g. for cross-machine tuning via
- * tools/bench_ab.sh CXXFLAGS_B); the defaults were tuned on Zen 5. */
+ * tools/bench_ab.sh CXXFLAGS_B); the defaults were tuned on an i7-4770,
+ * a Raspberry Pi 5 (Cortex-A76) and Zen 5. */
 #ifndef MINISKETCH_TRACEMOD_POLYMUL_CUTOFF
 #define MINISKETCH_TRACEMOD_POLYMUL_CUTOFF 24
 #endif

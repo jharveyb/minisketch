@@ -108,15 +108,9 @@ reduce once" (chapter 1).
 
 Where the code and a document disagree, this spec follows the code.
 
-1. **Tuning hardware.** The header comment of the cutoff block in
-   `src/sketch_impl.h:19` says "the defaults were tuned on Zen 5".
-   `CLAUDE.md` says the cutoffs were tuned on an i7-4770 and a Pi 5
-   (Cortex-A76), and the individual macro comments and
-   `doc/optimizations.md` cite Haswell (i7-4770), Cortex-A76 (Pi 5) and a
-   "devbox". No measurement in the repository is attributed to Zen 5 (the
-   only AMD figure is one negative result on Zen 3, and `tools/bench_host.sh`
-   mentions a mobile Zen 5 machine; the "devbox" may be that machine, which
-   could not be confirmed). Chapter 7 lists what each comment says.
+1. **Tuning hardware** (resolved). The cutoffs were tuned on all three
+   machines (i7-4770, Pi 5, Zen 5); `src/sketch_impl.h` and `CLAUDE.md` now
+   both say so.
 2. **Stale cutoffs in `doc/optimizations.md`.** The section "Implemented:
    the additive-FFT multiplication tier" gives
    `TRACEMOD_FFT_TABLE_CUTOFF = 256`; the code has 704 (the later "Lazy

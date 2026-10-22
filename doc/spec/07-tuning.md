@@ -63,14 +63,9 @@ Two properties of the field select tiers:
 | `PSUM_SPLIT_MIN` | 256 | power-sum splits for Montgomery nodes of degree ≥ 256 (and root psum only from degree 256) | half-size BM vs Euclid | optimizations.md: ≈0.45 n^2 vs ≈1.09 n^2 ns at n = 1536 ("devbox") |
 | `MONT_NORMALIZE_MIN` | 512 | Montgomery split traces are normalized (ToNormal) from node degree 512; below, the unit multiple goes to the gcd | one reduction vs a longer first gcd division | not stated |
 
-**Tuning hardware discrepancy.** The block comment above these macros
-(`src/sketch_impl.h:19`) says "the defaults were tuned on Zen 5".
-`CLAUDE.md` says they were tuned on an i7-4770 and a Pi 5 (Cortex-A76),
-and every measurement cited in the comments and in
-`doc/optimizations.md` is from the i7-4770 (Haswell), the Pi 5, or an
-unnamed "devbox". Apart from a remark about a mobile Zen 5 machine in
-`tools/bench_host.sh`, nothing else in the repository supports the Zen 5
-statement.
+**Tuning hardware.** The defaults were tuned on an i7-4770 (Haswell), a
+Raspberry Pi 5 (Cortex-A76) and a Zen 5 machine; the measurements cited in
+the macro comments and `doc/optimizations.md` are from the first two.
 
 ## Internal constants (not macros)
 
