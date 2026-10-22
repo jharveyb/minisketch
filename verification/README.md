@@ -41,6 +41,7 @@ One module per area, matching the sections of the registry:
 | `Minisketch/Decode.lean` | Λ_R S_R = −xΛ_R′ (C2); odd-syndrome Λ² recurrence (C16); a decode BM accepts re-encodes to the input and has no zero root (C37) |
 | `Minisketch/BMTail.lean` | BM tail identity, even/odd discrepancy recurrences, exactness of the odd-only tail check (C13–C15) |
 | `Minisketch/Trace.lean` | trace splitting, fail-fast test, gcd side stays in GF(2^b), shared orbit, full-split test, relative trace, separation by independent split parameters (C20–C23, C25, C26, C28) |
+| `Minisketch/Depth.lean` | depth bound: a node after k trace splits has at most 2^(b−k) roots (C24) |
 | `Minisketch/Reduce.lean` | two folds reduce a carry-less product exactly when 2·deg MOD − 2 < B (C47) |
 | `Minisketch/Cantor.lean` | y² + y = c solvable iff Tr(c) = 0; S^(2^ℓ−1) = Tr; the Cantor chain exists for b = 2^ℓ (C38) |
 | `Minisketch/Tower.lean` | tower split parameters basis·x^l·z^j are independent; SubfieldGenerator's z has period s; they separate all roots (C27) |

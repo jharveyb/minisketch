@@ -278,14 +278,14 @@ trace K → GF(2).
 - status: proved
 
 ### C24: depth bound
-- statement: a node reached after k splits with linearly independent β_1..β_k has its roots in an affine subspace of dimension b − k, so at most 2^{b−k} roots.
+- statement: in GF(2^b) (card K = 2^b, char 2) with GF(2)-independent split parameters β_0..β_{b−1} (distinct subset sums on subsets of range b, as in C25), for any k and fixed bits c_i, the set {α : Tr(β_i α) = c_i for all i < k} has at most 2^{b−k} elements (no k ≤ b needed; for k ≥ b the bound is 1). So a node at depth k, whose roots all satisfy those constraints, has at most 2^{b−k} roots, i.e. (deg − 1) >> (b − k) = 0. Proof: by C25 the bits (Tr(β_i α))_{i<b} determine α; on the set the first k are fixed, so α ↦ (Tr(β_i α))_{k≤i<b} is an injection into {0,1}^{b−k}.
 - source: src/sketch_impl.h:2239
 - kind: textbook
-- lean: Minisketch.Trace.depth_bound
+- lean: Minisketch.Depth.depth_bound, Minisketch.Depth.depth_bound_roots
 - oracle: -
 - tests: TestFindRootsDeepTree
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C25: independent β's separate all roots
 - statement: in GF(2^b), if β_0..β_{b−1} are GF(2)-linearly independent (distinct subset sums), then for α ≠ α′ some Tr(β_i α) ≠ Tr(β_i α′). Proof: the subset sums are then all of K, so otherwise Tr(γ(α − α′)) = 0 for every γ, but Tr is a nonzero polynomial of degree 2^{b−1} < |K|.
