@@ -308,14 +308,15 @@ trace K → GF(2).
 - status: proved
 
 ### C27: tower split parameters
-- statement: for 8 | b and z generating GF(2^8), {γ·x^l·z^j : l < b/8, j < 8} is a GF(2)-basis of K (x a generator of K over GF(2^8)); since z^{2^8} = z, Tr(γ z^k x) = Σ_{r<8} (z^k)^{2^r}·Z_r with 8 bucket sums Z_r. Same with GF(16) and 4 | b. The bucket identity is C28 (proved); the basis property is checked by rank for b ∈ {8, 16, 24, 32, 64}.
-- source: doc/optimizations.md:524, src/sketch_impl.h:1758
+- statement: for s | b and z generating GF(2^s), the split parameters β_(sl+j) = basis·x^l·z^j (l < b/s, j < s; x the field generator, basis ≠ 0) are GF(2)-linearly independent, so they separate every pair of roots (C25). SubfieldGenerator's z (a relative trace w ∈ GF(2^s) accepted when w^(2^(s/2)) ≠ w, s a power of two) has Frobenius period exactly s. Since z^(2^s) = z, Tr(γ z^k x) = Σ_{r<s} (z^k)^{2^r}·Z_r with s bucket sums (the bucket identity, C28). Used with s = 8 (8 | b) and s = 4 (the Montgomery tree). Proof: a dependency gives Σ_l c_l x^l = 0 with c_l ∈ GF(2^s); the polynomial Σ c_l T^l would have the b/s distinct roots x^(2^(s i)), so each c_l = 0, and each c_l = Σ_j z^j = 0 likewise contradicts the s distinct roots z^(2^k).
+- source: doc/optimizations.md:524, src/sketch_impl.h:1316 (TowerBetas)
 - kind: novel (application)
-- lean: Minisketch.Trace.tower_basis
+- lean: Minisketch.Tower.tower_betas_indep, Minisketch.Tower.subfield_generator_period, Minisketch.Tower.tower_separates
+- depends: C7, C25
 - oracle: tower_betas
-- tests: TestFindRootsOrbit (rank check, RefTrace); pyminisketch TestOracle.test_orbit_and_betas
+- tests: unit-tests tower_betas_all_fields (TowerBetas rank and the period hypotheses, every field size divisible by 4, s = 4 and 8; basis = 1 covers every seed since a nonzero scalar keeps independence); TestFindRootsOrbit; pyminisketch TestOracle.test_orbit_and_betas
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C28: relative-trace transitivity
 - statement: Tr_{K/GF(2)} = Tr_{GF(16)/GF(2)} ∘ Tr_{K/GF(16)}; so Tr(β z^k x) = Tr_{GF(16)/GF(2)}(z^k·T) with T = Tr_{K/GF(16)}(βx), and one carried T serves 4 depths.

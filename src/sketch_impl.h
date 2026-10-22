@@ -1314,6 +1314,24 @@ typename F::Elem SubfieldGenerator(const F& field, int sub) {
 template<typename F>
 typename F::Elem SubfieldGenerator8(const F& field) { return SubfieldGenerator(field, 8); }
 
+/** Tower split parameters beta_(sl+j) = basis * x^l * z^j (l < Bits/s, j < s)
+ * with z = SubfieldGenerator(field, s); s divides Bits. They are
+ * GF(2)-linearly independent (claim C27). */
+template<typename F>
+void TowerBetas(const F& field, typename F::Elem basis, int s, typename F::Elem* betas) {
+    typedef typename F::Elem Elem;
+    const Elem z = SubfieldGenerator(field, s);
+    Elem xl = basis;
+    for (int l = 0; l < field.Bits() / s; ++l) {
+        Elem v = xl;
+        for (int j = 0; j < s; ++j) {
+            betas[s * l + j] = v;
+            v = field.Mul(v, z);
+        }
+        xl = field.Mul2(xl);
+    }
+}
+
 /* ---------- Montgomery arithmetic on additive-FFT cosets ----------
  *
  * For a monic g of degree <= N = 2^m and a coset C = W_m + eta_(b*2^m) of
@@ -1797,15 +1815,7 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
     Elem z = 0;
     if (tower) {
         z = SubfieldGenerator8(field);
-        Elem xl = basis;
-        for (int l = 0; l < bits / 8; ++l) {
-            Elem v = xl;
-            for (int j = 0; j < 8; ++j) {
-                betas[8 * l + j] = v;
-                v = field.Mul(v, z);
-            }
-            xl = field.Mul2(xl);
-        }
+        TowerBetas(field, basis, 8, betas.data());
     } else {
         Elem beta = basis;
         for (int k = 0; k < bits; ++k) {
@@ -1819,15 +1829,7 @@ bool ComputeTraceOrbit(const std::vector<typename F::Elem>& poly, typename F::El
         // with z generating GF(2^s), s = MONT_TOWER_BITS.
         std::vector<Elem> mbetas(bits);
         const Elem mz = SubfieldGenerator(field, MONT_TOWER_BITS);
-        Elem xl = basis;
-        for (int l = 0; l < bits / MONT_TOWER_BITS; ++l) {
-            Elem v = xl;
-            for (int j = 0; j < MONT_TOWER_BITS; ++j) {
-                mbetas[MONT_TOWER_BITS * l + j] = v;
-                v = field.Mul(v, mz);
-            }
-            xl = field.Mul2(xl);
-        }
+        TowerBetas(field, basis, MONT_TOWER_BITS, mbetas.data());
         MontTree<F> local_tree;
         MontCarry<F> local_carry;
         MontTree<F>& mtree = (tree && carry) ? *tree : local_tree;

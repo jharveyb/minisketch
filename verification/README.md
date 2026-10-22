@@ -43,6 +43,7 @@ One module per area, matching the sections of the registry:
 | `Minisketch/Trace.lean` | trace splitting, fail-fast test, gcd side stays in GF(2^b), shared orbit, full-split test, relative trace, separation by independent split parameters (C20–C23, C25, C26, C28) |
 | `Minisketch/Reduce.lean` | two folds reduce a carry-less product exactly when 2·deg MOD − 2 < B (C47) |
 | `Minisketch/Cantor.lean` | y² + y = c solvable iff Tr(c) = 0; S^(2^ℓ−1) = Tr; the Cantor chain exists for b = 2^ℓ (C38) |
+| `Minisketch/Tower.lean` | tower split parameters basis·x^l·z^j are independent; SubfieldGenerator's z has period s; they separate all roots (C27) |
 | `Minisketch/PolyArith.lean` | transposed Karatsuba middle product (C17) |
 | `Minisketch/PowerSumSplit.lean` | power-sum split formula, uniqueness of the BM-recovered side, empty side, complement (C35) |
 | `Minisketch/Montgomery.lean` | coset Montgomery step, carry to a child, Montgomery-form gcd, CosetDivide, coset full-split test (C30–C33, C36) |

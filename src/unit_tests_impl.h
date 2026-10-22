@@ -1177,6 +1177,41 @@ void TestDecodeStagesLarge(const F& field, TestRand& rng, size_t count) {
 }
 
 /** Run every property group against one field instantiation. */
+/** The tower split parameters (TowerBetas, claim C27) are GF(2)-linearly
+ * independent for every subfield degree s in {4, 8} dividing Bits. Scaling by
+ * the seed's nonzero basis preserves independence, so basis = 1 covers every
+ * seed. Also checks the hypotheses of the Lean proof: z lies in GF(2^s)
+ * (z^(2^s) = z) and in no proper subfield of it (z^(2^(s/2)) != z). */
+template<typename F>
+void TestTowerBetas() {
+    typedef typename F::Elem Elem;
+    F field;
+    const int bits = field.Bits();
+    for (int s : {4, 8}) {
+        if (bits % s != 0) continue;
+        Elem z = SubfieldGenerator(field, s);
+        Elem zp = z;
+        for (int i = 0; i < s / 2; ++i) zp = field.Sqr(zp);
+        UT_REQUIRE(zp != z);
+        for (int i = 0; i < s / 2; ++i) zp = field.Sqr(zp);
+        UT_REQUIRE(zp == z);
+        std::vector<Elem> betas(bits);
+        TowerBetas(field, Elem(1), s, betas.data());
+        uint64_t pivot[64] = {0};
+        for (auto b : betas) {
+            uint64_t v = uint64_t(b);
+            int bit = 63;
+            for (; bit >= 0; --bit) {
+                if (!((v >> bit) & 1)) continue;
+                if (!pivot[bit]) break;
+                v ^= pivot[bit];
+            }
+            UT_REQUIRE(bit >= 0); // reduced to zero: dependent
+            pivot[bit] = v;
+        }
+    }
+}
+
 template<typename F>
 void RunAllFieldTests(uint64_t seed_offset) {
     F field;

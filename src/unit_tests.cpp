@@ -22,7 +22,11 @@
 // includes already define the ConstructGeneric* symbols.
 #include "fields/generic_1byte.cpp"
 #include "fields/generic_2bytes.cpp"
+#include "fields/generic_3bytes.cpp"
 #include "fields/generic_4bytes.cpp"
+#include "fields/generic_5bytes.cpp"
+#include "fields/generic_6bytes.cpp"
+#include "fields/generic_7bytes.cpp"
 #include "fields/generic_8bytes.cpp"
 
 #include "test_utils.h"
@@ -129,4 +133,56 @@ BOOST_AUTO_TEST_CASE(bitrw_roundtrip) {
         UT_REQUIRE((reader.Read<63, uint64_t>()) == v63);
         UT_REQUIRE((reader.Read<64, uint64_t>()) == v64);
     }
+}
+
+/* Tower split parameters for every field size divisible by 4 (C27). */
+BOOST_AUTO_TEST_CASE(tower_betas_all_fields) {
+#ifndef DISABLE_FIELD_4
+    ut::TestTowerBetas<Field4>();
+#endif
+#ifndef DISABLE_FIELD_8
+    ut::TestTowerBetas<Field8>();
+#endif
+#ifndef DISABLE_FIELD_12
+    ut::TestTowerBetas<Field12>();
+#endif
+#ifndef DISABLE_FIELD_16
+    ut::TestTowerBetas<Field16>();
+#endif
+#ifndef DISABLE_FIELD_20
+    ut::TestTowerBetas<Field20>();
+#endif
+#ifndef DISABLE_FIELD_24
+    ut::TestTowerBetas<Field24>();
+#endif
+#ifndef DISABLE_FIELD_28
+    ut::TestTowerBetas<Field28>();
+#endif
+#ifndef DISABLE_FIELD_32
+    ut::TestTowerBetas<Field32>();
+#endif
+#ifndef DISABLE_FIELD_36
+    ut::TestTowerBetas<Field36>();
+#endif
+#ifndef DISABLE_FIELD_40
+    ut::TestTowerBetas<Field40>();
+#endif
+#ifndef DISABLE_FIELD_44
+    ut::TestTowerBetas<Field44>();
+#endif
+#ifndef DISABLE_FIELD_48
+    ut::TestTowerBetas<Field48>();
+#endif
+#ifndef DISABLE_FIELD_52
+    ut::TestTowerBetas<Field52>();
+#endif
+#ifndef DISABLE_FIELD_56
+    ut::TestTowerBetas<Field56>();
+#endif
+#ifndef DISABLE_FIELD_60
+    ut::TestTowerBetas<Field60>();
+#endif
+#ifndef DISABLE_FIELD_64
+    ut::TestTowerBetas<Field64>();
+#endif
 }

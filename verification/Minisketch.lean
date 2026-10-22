@@ -11,3 +11,4 @@ import Minisketch.Decode
 import Minisketch.PolyArith
 import Minisketch.Cantor
 import Minisketch.Reduce
+import Minisketch.Tower
