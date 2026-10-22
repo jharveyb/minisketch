@@ -150,7 +150,7 @@ trace K → GF(2).
 - kind: textbook (Berlekamp 1968), relied on for arbitrary inputs
 - lean: Minisketch.BMEven.even_discrepancy_zero
 - oracle: bm_odd
-- tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2)
+- tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2); tests/conformance.py (C++ stages vs the oracle)
 - spec: 04-bm
 - status: proved
 
@@ -180,7 +180,7 @@ trace K → GF(2).
 - kind: novel
 - lean: Minisketch.BMTail.tail_check_iff
 - oracle: bm_odd
-- tests: TestBerlekampMasseyVsRef (all tail tiers)
+- tests: TestBerlekampMasseyVsRef (all tail tiers); tests/conformance.py (C++ stages vs the oracle)
 - spec: 04-bm
 - status: proved
 
@@ -191,7 +191,7 @@ trace K → GF(2).
 - lean: Minisketch.BMEven.bm_odd_early_eq_bm, Minisketch.BMEven.bm_stable
 - depends: C12, C15
 - oracle: bm_odd
-- tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2)
+- tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2); tests/conformance.py (C++ stages vs the oracle)
 - spec: 04-bm
 - status: proved
 
@@ -263,7 +263,7 @@ trace K → GF(2).
 - kind: textbook
 - lean: Minisketch.Trace.dvd_frobenius_iff, Minisketch.Trace.frobenius_mod_iff
 - oracle: poly_frobeniusmod
-- tests: TestFindRoots (irreducible quadratic, double root)
+- tests: TestFindRoots (irreducible quadratic, double root); tests/conformance.py (C++ stages vs the oracle)
 - spec: 05-roots
 - status: proved
 
@@ -303,7 +303,7 @@ trace K → GF(2).
 - kind: textbook
 - lean: Minisketch.Trace.trPoly_orbit, Minisketch.Trace.modByMonic_of_dvd
 - oracle: frobenius_orbit
-- tests: TestFindRootsOrbit
+- tests: TestFindRootsOrbit; tests/conformance.py (C++ stages vs the oracle)
 - spec: 05-roots
 - status: proved
 
@@ -344,7 +344,7 @@ trace K → GF(2).
 - lean: Minisketch.Subspace.reduce_coset
 - depends: C29
 - oracle: mont_square
-- tests: TestFindRootsMontgomery
+- tests: TestFindRootsMontgomery; tests/conformance.py (C++ stages vs the oracle)
 - spec: 05-roots
 - status: proved
 
@@ -375,7 +375,7 @@ trace K → GF(2).
 - kind: novel
 - lean: Minisketch.Montgomery.coset_divide_exact
 - oracle: coset_divide
-- tests: TestFindRootsMontgomery
+- tests: TestFindRootsMontgomery; tests/conformance.py (C++ stages vs the oracle)
 - spec: 05-roots
 - status: proved
 
@@ -396,7 +396,7 @@ trace K → GF(2).
 - lean: Minisketch.PowerSumSplit.side_unique, Minisketch.BMPowerSum.bm_len_le_card
 - depends: C5, C48
 - oracle: power_sum_split
-- tests: TestFindRootsMontgomery (intact and corrupted sums)
+- tests: TestFindRootsMontgomery (intact and corrupted sums); tests/conformance.py (C++ stages vs the oracle)
 - spec: 05-roots
 - status: proved
 
@@ -406,7 +406,7 @@ trace K → GF(2).
 - kind: novel
 - lean: Minisketch.Montgomery.split_test
 - oracle: montgomery_orbit
-- tests: TestFindRootsMontgomery; pyminisketch TestOracle.test_montgomery_orbit
+- tests: TestFindRootsMontgomery; pyminisketch TestOracle.test_montgomery_orbit; tests/conformance.py (C++ stages vs the oracle)
 - spec: 05-roots
 - status: proved
 
@@ -520,6 +520,6 @@ trace K → GF(2).
 - kind: novel (conjunction of C12–C15, C20–C37)
 - lean: Minisketch.Decode.decode_eq_textbook
 - oracle: decode_fast
-- tests: pyminisketch TestOracle.test_decode_fast* (exhaustive for GF(4..32) at capacity ≤ 3 and GF(256) at 2, random to capacity 30, a forced Montgomery/power-sum path at 300 elements), tests/differential.py (capacity ≤ 16), TestExhaustive, fuzz decode
+- tests: pyminisketch TestOracle.test_decode_fast* (exhaustive for GF(4..32) at capacity ≤ 3 and GF(256) at 2, random to capacity 30, a forced Montgomery/power-sum path at 300 elements), tests/differential.py (capacity ≤ 16), TestExhaustive, fuzz decode; tests/conformance.py (C++ stages vs the oracle)
 - spec: 06-decode
 - status: tested
