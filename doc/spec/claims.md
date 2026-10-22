@@ -149,8 +149,8 @@ trace K → GF(2).
 - source: doc/optimizations.md:453, doc/decode_explained.md:38, src/sketch_impl.h:2594
 - kind: textbook (Berlekamp 1968), relied on for arbitrary inputs
 - lean: Minisketch.BM.even_discrepancy_zero
-- oracle: bm_odd (planned)
-- tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef
+- oracle: bm_odd
+- tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2)
 - spec: 04-bm
 - status: tested
 
@@ -159,7 +159,7 @@ trace K → GF(2).
 - source: doc/optimizations.md:474, src/sketch_impl.h:2606
 - kind: novel
 - lean: Minisketch.BMTail.tail_identity
-- oracle: verify_tail_odd (planned)
+- oracle: verify_tail_odd
 - tests: TestBerlekampMasseyVsRef
 - spec: 04-bm
 - status: proved
@@ -169,7 +169,7 @@ trace K → GF(2).
 - source: doc/optimizations.md:467, src/sketch_impl.h:2611
 - kind: novel
 - lean: Minisketch.BMTail.even_coeff
-- oracle: verify_tail_odd (planned)
+- oracle: verify_tail_odd
 - tests: TestBerlekampMasseyVsRef
 - spec: 04-bm
 - status: proved
@@ -179,7 +179,7 @@ trace K → GF(2).
 - source: doc/optimizations.md:465, src/sketch_impl.h:2450, src/sketch_impl.h:2606
 - kind: novel
 - lean: Minisketch.BMTail.tail_check_iff
-- oracle: bm_odd (planned)
+- oracle: bm_odd
 - tests: TestBerlekampMasseyVsRef (all tail tiers)
 - spec: 04-bm
 - status: proved
@@ -190,8 +190,8 @@ trace K → GF(2).
 - kind: novel
 - lean: Minisketch.BM.bm_odd_early_eq_bm
 - depends: C12, C15
-- oracle: bm_odd (planned)
-- tests: TestBerlekampMasseyVsRef (all tail tiers), TestBerlekampMasseyExhaustive
+- oracle: bm_odd
+- tests: TestBerlekampMasseyExhaustive (GF(4..16)), TestBerlekampMasseyVsRef; pyminisketch TestOracle.test_bm_odd_exhaustive (every vector and max_degree: GF(4) cap 5 … GF(256) cap 2)
 - spec: 04-bm
 - status: tested
 
@@ -200,7 +200,7 @@ trace K → GF(2).
 - source: src/sketch_impl.h:2450, doc/decode_coding_theory.md:38
 - kind: textbook
 - lean: Minisketch.BM.odd_recurrence
-- oracle: verify_tail_odd (planned)
+- oracle: verify_tail_odd
 - tests: TestBerlekampMasseyVsRef
 - spec: 04-bm
 - status: open
@@ -210,7 +210,7 @@ trace K → GF(2).
 - source: doc/optimizations.md:489, src/sketch_impl.h:2405
 - kind: textbook (transposition principle)
 - lean: Minisketch.PolyArith.middle_product_karatsuba
-- oracle: middle_product_kara (planned)
+- oracle: middle_product_kara
 - tests: via VerifyTail and PowerSumSplit only
 - spec: 03-polyarith
 - status: open
@@ -241,41 +241,41 @@ trace K → GF(2).
 - statement: Tr is GF(2)-linear with values in {0,1}; for f square-free and split, T = Tr(βx) mod f gives gcd(f, T) = Π_{α: Tr(βα)=0}(x − α).
 - source: doc/math_decode.md:19, doc/decode_explained.md:81
 - kind: textbook
-- lean: Minisketch.Trace.gcd_trace_split
+- lean: Minisketch.Trace.trace_split, Minisketch.Trace.tr_mem
 - oracle: poly_find_roots
 - tests: TestFindRoots
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C21: fail-fast trace test
 - statement: T + T^2 ≡ β(x + x^{2^b}) mod g for T = Tr(βx) mod g; if g is square-free and split this is 0.
 - source: src/sketch_impl.h:2193
 - kind: textbook
-- lean: Minisketch.Trace.trace_add_sq
+- lean: Minisketch.Trace.trPoly_sq_add
 - oracle: -
 - tests: TestFindRoots
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C22: full-split test
 - statement: x^{2^b} ≡ x mod f iff f is square-free and splits into distinct linear factors over K. (Decodability additionally needs BM success, deg f ≤ capacity and f(0) ≠ 0, see C37.)
 - source: doc/optimizations.md:535, src/sketch_impl.h:1769, doc/math_decode.md:25
 - kind: textbook
-- lean: Minisketch.Trace.frobenius_fixed_iff_split
+- lean: Minisketch.Trace.dvd_frobenius_iff, Minisketch.Trace.frobenius_mod_iff
 - oracle: poly_frobeniusmod
 - tests: TestFindRoots (irreducible quadratic, double root)
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C23: the trace-0 side never holds an irreducible factor
 - statement: in the non-fully-factorizable path, at a root α ∉ K of g, t + t^2 = β(α + α^{2^b}) ≠ 0, so t(α) ∉ {0,1}; hence gcd(g, t) has only roots in K and recursing on it cannot fail.
 - source: src/sketch_impl.h:2338
 - kind: textbook
-- lean: Minisketch.Trace.gcd_side_split
+- lean: Minisketch.Trace.gcd_side_fixed
 - oracle: -
 - tests: TestFindRoots
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C24: depth bound
 - statement: a node reached after k splits with linearly independent β_1..β_k has its roots in an affine subspace of dimension b − k, so at most 2^{b−k} roots.
@@ -301,19 +301,19 @@ trace K → GF(2).
 - statement: for g | f, (h mod f) mod g = h mod g; and Tr(βx) mod f = Σ_i β^{2^i}·X_i with X_i = x^{2^i} mod f. So one orbit at the root gives every node's trace.
 - source: doc/optimizations.md:512, doc/math_decode.md:21
 - kind: textbook
-- lean: Minisketch.Trace.trace_orbit
-- oracle: frobenius_orbit (planned)
+- lean: Minisketch.Trace.trPoly_orbit, Minisketch.Trace.modByMonic_of_dvd
+- oracle: frobenius_orbit
 - tests: TestFindRootsOrbit
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C27: tower split parameters
-- statement: for 8 | b and z generating GF(2^8), {γ·x^l·z^j : l < b/8, j < 8} is a GF(2)-basis of K (x a generator of K over GF(2^8)); since z^{2^8} = z, Tr(γ z^k x) = Σ_{r<8} (z^k)^{2^r}·Z_r with 8 bucket sums Z_r. Same with GF(16) and 4 | b.
+- statement: for 8 | b and z generating GF(2^8), {γ·x^l·z^j : l < b/8, j < 8} is a GF(2)-basis of K (x a generator of K over GF(2^8)); since z^{2^8} = z, Tr(γ z^k x) = Σ_{r<8} (z^k)^{2^r}·Z_r with 8 bucket sums Z_r. Same with GF(16) and 4 | b. The bucket identity is C28 (proved); the basis property is checked by rank for b ∈ {8, 16, 24, 32, 64}.
 - source: doc/optimizations.md:524, src/sketch_impl.h:1758
 - kind: novel (application)
 - lean: Minisketch.Trace.tower_basis
-- oracle: tower_betas (planned)
-- tests: TestFindRootsOrbit (rank check, RefTrace)
+- oracle: tower_betas
+- tests: TestFindRootsOrbit (rank check, RefTrace); pyminisketch TestOracle.test_orbit_and_betas
 - spec: 05-roots
 - status: open
 
@@ -321,18 +321,18 @@ trace K → GF(2).
 - statement: Tr_{K/GF(2)} = Tr_{GF(16)/GF(2)} ∘ Tr_{K/GF(16)}; so Tr(β z^k x) = Tr_{GF(16)/GF(2)}(z^k·T) with T = Tr_{K/GF(16)}(βx), and one carried T serves 4 depths.
 - source: doc/optimizations.md:789, doc/math_decode.md:52
 - kind: textbook
-- lean: Minisketch.Trace.trace_tower
+- lean: Minisketch.Trace.tr_tower
 - oracle: -
 - tests: TestFindRootsMontgomery (RefTrace)
 - spec: 05-roots
-- status: open
+- status: proved
 
 ### C29: coset vanishing polynomial
 - statement: for a Cantor chain (β_0 = 1, β_{j+1}^2 + β_{j+1} = β_j) the subspace polynomials S^0 = x, S^{m+1} = (S^m)^2 + S^m are additive, monic of degree 2^m, with (S^m)' = 1, S^m(β_{j+m}) = β_j and S^m(β_j) = 0 for j < m. The chain is GF(2)-independent, so the coset C = η + span(β_0..β_{m−1}) has 2^m points, Z_C = S^m + S^m(η) and Z_C' = 1. Halving: Z_{C0} = 1 on C1 = C0 + β_{m−1}.
 - source: src/sketch_impl.h:1319, doc/optimizations.md:740, src/additive_fft.h:28
 - kind: textbook (Cantor)
 - lean: Minisketch.Subspace.cantor_vanishing_derivative
-- oracle: cantor_basis (planned)
+- oracle: cantor_basis
 - tests: TestAdditiveFFT
 - spec: 03-polyarith
 - status: proved
@@ -343,7 +343,7 @@ trace K → GF(2).
 - kind: novel
 - lean: Minisketch.Subspace.reduce_coset
 - depends: C29
-- oracle: mont_square (planned)
+- oracle: mont_square
 - tests: TestFindRootsMontgomery
 - spec: 05-roots
 - status: proved
@@ -354,7 +354,7 @@ trace K → GF(2).
 - kind: novel
 - lean: Minisketch.Subspace.carry_coset
 - depends: C29
-- oracle: mont_carry_to_factor (planned)
+- oracle: mont_carry_to_factor
 - tests: TestFindRootsMontgomery
 - spec: 05-roots
 - status: proved
@@ -374,7 +374,7 @@ trace K → GF(2).
 - source: src/sketch_impl.h:1968, doc/optimizations.md:815
 - kind: novel
 - lean: Minisketch.Montgomery.coset_divide_exact
-- oracle: coset_divide (planned)
+- oracle: coset_divide
 - tests: TestFindRootsMontgomery
 - spec: 05-roots
 - status: proved
@@ -384,7 +384,7 @@ trace K → GF(2).
 - source: doc/optimizations.md:767, src/additive_fft.h:312
 - kind: novel (application of Lin–Chung–Han)
 - lean: Minisketch.AdditiveFFT.novel_derivative
-- oracle: novel_derivative (planned)
+- oracle: novel_derivative
 - tests: TestAdditiveFFT
 - spec: 03-polyarith
 - status: open
@@ -395,7 +395,7 @@ trace K → GF(2).
 - kind: novel
 - lean: Minisketch.PowerSumSplit.side_unique
 - depends: C5
-- oracle: power_sum_split (planned)
+- oracle: power_sum_split
 - tests: TestFindRootsMontgomery (intact and corrupted sums)
 - spec: 05-roots
 - status: proved
@@ -405,8 +405,8 @@ trace K → GF(2).
 - source: src/sketch_impl.h:1691
 - kind: novel
 - lean: Minisketch.Montgomery.split_test
-- oracle: -
-- tests: TestFindRootsMontgomery
+- oracle: montgomery_orbit
+- tests: TestFindRootsMontgomery; pyminisketch TestOracle.test_montgomery_orbit
 - spec: 05-roots
 - status: open
 
@@ -416,7 +416,7 @@ trace K → GF(2).
 - kind: textbook (binary BCH), not written down anywhere in the docs
 - lean: Minisketch.Decode.decode_reencodes
 - oracle: Minisketch.decode
-- tests: TestExhaustive, TestRandomized, fuzz decode
+- tests: TestExhaustive, TestRandomized, fuzz decode; pyminisketch TestOracle.test_decode_fast_exhaustive (re-encoding and no zero element, every sketch of the tiny fields)
 - spec: 06-decode
 - status: tested
 
@@ -425,7 +425,7 @@ trace K → GF(2).
 - source: src/additive_fft.h:21, doc/optimizations.md:158
 - kind: textbook (Cantor 1989)
 - lean: Minisketch.AdditiveFFT.cantor_basis_exists
-- oracle: cantor_basis (planned)
+- oracle: cantor_basis
 - tests: TestAdditiveFFT
 - spec: 03-polyarith
 - status: open
@@ -435,7 +435,7 @@ trace K → GF(2).
 - source: src/additive_fft.h, src/sketch_impl.h:447, src/sketch_impl.h:636, src/sketch_impl.h:266, src/sketch_impl.h:923, doc/optimizations.md:356
 - kind: textbook (a–d, f, g), novel application (e)
 - lean: Minisketch.PolyArith.primitives
-- oracle: additive_fft (planned)
+- oracle: additive_fft
 - tests: TestAdditiveFFT, TestTraceModReducers, TestSubquadraticGCD
 - spec: 03-polyarith
 - status: tested
@@ -446,7 +446,7 @@ trace K → GF(2).
 - kind: novel (implementation)
 - lean: Minisketch.Field.reduce_correct
 - native_decide: allowed
-- oracle: GF2Ops.mul
+- oracle: GF2Ops
 - tests: TestFieldOps (exhaustive for b ≤ 8)
 - spec: 01-field
 - status: tested
@@ -518,7 +518,7 @@ trace K → GF(2).
 - source: doc/optimizations.md:445, doc/decode_explained.md:255, doc/decode_coding_theory.md:120
 - kind: novel (conjunction of C12–C15, C20–C37)
 - lean: Minisketch.Decode.decode_eq_textbook
-- oracle: Minisketch.decode
-- tests: tests/differential.py (capacity ≤ 16), TestExhaustive, fuzz decode
+- oracle: decode_fast
+- tests: pyminisketch TestOracle.test_decode_fast* (exhaustive for GF(4..32) at capacity ≤ 3 and GF(256) at 2, random to capacity 30, a forced Montgomery/power-sum path at 300 elements), tests/differential.py (capacity ≤ 16), TestExhaustive, fuzz decode
 - spec: 06-decode
 - status: tested

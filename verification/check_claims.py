@@ -99,21 +99,25 @@ def main():
         if status in ('proved', 'stated') and c.get('lean', '-') == '-':
             errors.append(f"{c['id']}: {status} but no lean theorem")
 
+    def lean_names(c):
+        return [n.strip() for n in c.get('lean', '-').split(',') if n.strip() not in ('', '-')]
+
     need = [c for c in claims if c.get('status') in ('proved', 'stated')]
     if need and not args.no_lean:
-        axioms = lean_axioms([c['lean'] for c in need])
+        axioms = lean_axioms([n for c in need for n in lean_names(c)])
         for c in need:
-            ax = axioms[c['lean']]
-            if ax is None:
-                errors.append(f"{c['id']}: Lean theorem {c['lean']} not found")
-                continue
-            if c['status'] == 'proved':
-                allowed = set(STD_AXIOMS)
-                if c.get('native_decide') == 'allowed':
-                    allowed.add('Lean.ofReduceBool')
-                bad = ax - allowed
-                if bad:
-                    errors.append(f"{c['id']}: proved, but {c['lean']} uses {sorted(bad)}")
+            for n in lean_names(c):
+                ax = axioms[n]
+                if ax is None:
+                    errors.append(f"{c['id']}: Lean theorem {n} not found")
+                    continue
+                if c['status'] == 'proved':
+                    allowed = set(STD_AXIOMS)
+                    if c.get('native_decide') == 'allowed':
+                        allowed.add('Lean.ofReduceBool')
+                    bad = ax - allowed
+                    if bad:
+                        errors.append(f"{c['id']}: proved, but {n} uses {sorted(bad)}")
 
     by_id = {c['id']: c for c in claims}
     for c in claims:

@@ -36,6 +36,7 @@ One module per area, matching the sections of the registry:
 |---|---|
 | `Minisketch/Sketch.lean` | power sums: linearity, Frobenius halving, uniqueness (C1, C3, C4) |
 | `Minisketch/BMTail.lean` | BM tail identity, even/odd discrepancy recurrences, exactness of the odd-only tail check (C13–C15) |
+| `Minisketch/Trace.lean` | trace splitting, fail-fast test, gcd side stays in GF(2^b), shared orbit, full-split test, relative trace (C20–C23, C26, C28) |
 | `Minisketch/PowerSumSplit.lean` | power-sum split formula, uniqueness of the BM-recovered side, empty side, complement (C35) |
 | `Minisketch/Montgomery.lean` | coset Montgomery step, carry to a child, Montgomery-form gcd, CosetDivide (C30–C33) |
 | `Minisketch/Subspace.lean` | subspace polynomials on a Cantor chain, coset vanishing polynomials with derivative 1, coset halving; C30/C31 on real cosets (C29) |
