@@ -425,11 +425,11 @@ trace K → GF(2).
 - statement: for b a power of two there are β_0 = 1 and β_j with β_j^2 + β_j = β_{j−1} for 1 ≤ j < b, linearly independent. Reason: y^2 + y = β_{j−1} is solvable iff Tr(β_{j−1}) = 0, and with S^{b−1} = Tr (b = 2^ℓ) one gets Tr(β_{j−1}) = S^{b−j}(1) = 0 for j < b.
 - source: src/additive_fft.h:21, doc/optimizations.md:158
 - kind: textbook (Cantor 1989)
-- lean: Minisketch.AdditiveFFT.cantor_basis_exists
+- lean: Minisketch.Cantor.cantor_basis_exists, Minisketch.Cantor.artin_schreier, Minisketch.Cantor.S_tr
 - oracle: cantor_basis
 - tests: TestAdditiveFFT
 - spec: 03-polyarith
-- status: open
+- status: proved
 
 ### C39: polynomial arithmetic primitives
 - statement: (a) S^i(x) = Σ_{j: C(i,j) odd} x^{2^j}; (b) the LCH additive FFT evaluates at η_0..η_{2^m−1} in index order; (c) char-2 Karatsuba; (d) Newton inverse series g' = f g^2 mod x^{2m}; (e) the inversion-free pseudo-remainder equals β^2·(a mod b); (f) carry-less reduction is GF(2)-linear, so Σ reduce(a_i b_i) = reduce(Σ a_i b_i); (g) the half-gcd matrix depends only on the top 2·d − 1 coefficients.
