@@ -1,0 +1,15 @@
+config	side	ref	commit	implementation	min_ms	max_ms	spread_pct
+s128-e128-b64	A	general_math_speedup	40ad9d097	CLMUL	0.68978	0.69538	0.81
+s128-e128-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	0.67763	0.70319	3.77
+s512-e512-b64	A	general_math_speedup	40ad9d097	CLMUL	8.85408	9.08451	2.60
+s512-e512-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	3.83437	3.96066	3.29
+s1024-e1024-b64	A	general_math_speedup	40ad9d097	CLMUL	24.46539	24.65286	0.77
+s1024-e1024-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	10.14218	10.61417	4.65
+s2048-e2048-b64	A	general_math_speedup	40ad9d097	CLMUL	68.48812	69.51492	1.50
+s2048-e2048-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	29.67354	30.55785	2.98
+s4096-e4096-b64	A	general_math_speedup	40ad9d097	CLMUL	205.84971	206.76249	0.44
+s4096-e4096-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	88.41699	95.55565	8.07
+s1024-e1024-b32	A	general_math_speedup	40ad9d097	CLMUL	16.68761	16.78249	0.57
+s1024-e1024-b32	B	worktree-high-fill-decode	404de9bf9	CLMUL	10.97096	11.54162	5.20
+s4096-e4096-b32	A	general_math_speedup	40ad9d097	CLMUL	171.65148	172.56185	0.53
+s4096-e4096-b32	B	worktree-high-fill-decode	404de9bf9	CLMUL	103.68624	106.58453	2.80

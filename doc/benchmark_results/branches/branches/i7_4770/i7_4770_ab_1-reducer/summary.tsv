@@ -1,0 +1,15 @@
+config	side	ref	commit	implementation	min_ms	max_ms	spread_pct
+s128-e128-b64	A	test-additions	f7226980	CLMUL	4.45680	4.46877	0.27
+s128-e128-b64	B	fast-tracemod-reduce-allocs	296da76a	CLMUL	2.67689	2.71707	1.50
+s512-e512-b64	A	test-additions	f7226980	CLMUL	62.99184	63.14620	0.25
+s512-e512-b64	B	fast-tracemod-reduce-allocs	296da76a	CLMUL	35.43046	36.21164	2.20
+s1024-e1024-b64	A	test-additions	f7226980	CLMUL	242.40340	242.81875	0.17
+s1024-e1024-b64	B	fast-tracemod-reduce-allocs	296da76a	CLMUL	123.88207	124.48289	0.48
+s2048-e2048-b64	A	test-additions	f7226980	CLMUL	940.97411	942.17936	0.13
+s2048-e2048-b64	B	fast-tracemod-reduce-allocs	296da76a	CLMUL	402.97168	426.19261	5.76
+s4096-e4096-b64	A	test-additions	f7226980	CLMUL	3669.33364	3670.66839	0.04
+s4096-e4096-b64	B	fast-tracemod-reduce-allocs	296da76a	CLMUL	1337.53444	1376.59767	2.92
+s1024-e1024-b32	A	test-additions	f7226980	CLMUL	175.42685	175.61214	0.11
+s1024-e1024-b32	B	fast-tracemod-reduce-allocs	296da76a	CLMUL	81.36129	85.81611	5.48
+s4096-e4096-b32	A	test-additions	f7226980	CLMUL	2540.13350	2542.96570	0.11
+s4096-e4096-b32	B	fast-tracemod-reduce-allocs	296da76a	CLMUL	896.93579	925.72753	3.21

@@ -1,0 +1,15 @@
+config	side	ref	commit	implementation	min_ms	max_ms	spread_pct
+s128-e128-b64	A	subquadratic-gcd	9b0ee528	CLMUL	4.49436	4.53916	1.00
+s128-e128-b64	B	general_math_speedup	40ad9d09	CLMUL	0.89566	0.91573	2.24
+s512-e512-b64	A	subquadratic-gcd	9b0ee528	CLMUL	38.51424	45.52748	18.21
+s512-e512-b64	B	general_math_speedup	40ad9d09	CLMUL	10.31218	10.38204	0.68
+s1024-e1024-b64	A	subquadratic-gcd	9b0ee528	CLMUL	121.91362	127.17779	4.32
+s1024-e1024-b64	B	general_math_speedup	40ad9d09	CLMUL	36.03186	36.14968	0.33
+s2048-e2048-b64	A	subquadratic-gcd	9b0ee528	CLMUL	342.30722	353.51382	3.27
+s2048-e2048-b64	B	general_math_speedup	40ad9d09	CLMUL	97.31927	98.32528	1.03
+s4096-e4096-b64	A	subquadratic-gcd	9b0ee528	CLMUL	899.26684	927.17080	3.10
+s4096-e4096-b64	B	general_math_speedup	40ad9d09	CLMUL	286.73686	289.00986	0.79
+s1024-e1024-b32	A	subquadratic-gcd	9b0ee528	CLMUL	44.28006	44.99151	1.61
+s1024-e1024-b32	B	general_math_speedup	40ad9d09	CLMUL	17.53770	17.60654	0.39
+s4096-e4096-b32	A	subquadratic-gcd	9b0ee528	CLMUL	363.03776	379.46810	4.53
+s4096-e4096-b32	B	general_math_speedup	40ad9d09	CLMUL	169.34975	171.70061	1.39

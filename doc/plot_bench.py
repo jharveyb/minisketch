@@ -25,6 +25,19 @@ Plotting:
     python3 doc/plot_bench.py bench_sweep.tsv bench_diffs.tsv bench_fixed.tsv \\
         --output-dir doc/generated/ \\
         --fixed-capacity 1024,2048,4096 --fixed-errors 256,512,1024
+
+A/B comparisons (tools/bench_ab.sh with DATA_DIR, or tools/bench_progression.sh):
+pass one rounds.tsv, or all_rounds.tsv with --host/--ab to pick one run. Each
+point is the min over rounds with a bar up to the max; color and marker keep
+their meaning above, and the branch is the line style (A dashed, B solid).
+Most progression configs use errors == capacity, which the cap100 plot shows.
+`--plots stats` prints A min, B min, A/B and both spreads per point.
+
+    python3 doc/plot_bench.py \\
+        doc/benchmark_results/branches/branches/i7_4770/i7_4770_ab_12-cumulative-hf-o2fix/rounds.tsv \\
+        --bits 32,64 --output-dir doc/generated/ --title-suffix ", i7-4770"
+    python3 doc/plot_bench.py doc/benchmark_results/branches/branches/all_rounds.tsv \\
+        --host pi5_a76 --ab 7-math-target --fixed-capacity 1024,4096 --fixed-errors 64,256
 """
 
 from __future__ import annotations
@@ -65,14 +78,80 @@ def _create_metric(base: str, batch_size: int | None) -> str:
     return f"create-batch-K{batch_size}{unit}"
 
 
+POINT_KEYS = ["metric", "bits", "capacity", "errors", "data_len", "implementation"]
+
+# A/B mode (tools/bench_ab.sh DATA_DIR output): the branch is drawn with the
+# line style, so color and marker keep their single-branch meaning.
+SIDE_LINESTYLES = {"A": "--", "B": "-"}
+
+
+def _meta_labels(tsv: Path) -> dict[str, str]:
+    """Read the 'A: <ref> (<commit>) [CXXFLAGS_B=...]' lines of the meta.txt
+    that bench_ab.sh writes next to rounds.tsv. Drops the commit hash and the
+    CXXFLAGS_X= prefix, so an A/B of one ref with different flags reads e.g.
+    'general_math_speedup -DMINISKETCH_..._CUTOFF=1024'."""
+    meta = tsv.parent / "meta.txt"
+    labels: dict[str, str] = {}
+    if not meta.exists():
+        return labels
+    for line in meta.read_text().splitlines():
+        for side in SIDE_LINESTYLES:
+            if line.startswith(f"{side}: "):
+                parts = line[3:].split()
+                labels[side] = " ".join(
+                    p.split("=", 1)[1] if p.startswith("CXXFLAGS_") else p
+                    for p in parts if not (p.startswith("(") and p.endswith(")")))
+    return labels
+
+
 def load_tsv(paths: list[Path]) -> pd.DataFrame:
-    """Load and concatenate one or more bench TSVs, stripping repeated headers."""
-    frames = [pd.read_csv(p, sep="\t") for p in paths]
+    """Load and concatenate one or more bench TSVs, stripping repeated headers.
+
+    Plain `bench` output has one row per point. bench_ab.sh output (rounds.tsv,
+    or the concatenated all_rounds.tsv) adds side/ref/commit/round columns;
+    those rows get a 'variant' label (the branch, from meta.txt when present)
+    and an 'ab' label (the column, else the rounds.tsv directory name)."""
+    frames = []
+    for p in paths:
+        f = pd.read_csv(p, sep="\t", dtype=str)
+        if "side" in f.columns:
+            if "ab" not in f.columns:
+                f["ab"] = p.parent.name
+            labels = _meta_labels(p)
+            f["variant"] = f["side"].map(labels).astype(object).fillna(f["ref"])
+        frames.append(f)
     df = pd.concat(frames, ignore_index=True)
     df = df[df["metric"] != "metric"]
     for col in NUMERIC_COLS:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df.dropna(subset=["value"]).reset_index(drop=True)
+
+
+def aggregate_ab(df: pd.DataFrame, *, host: str | None,
+                 ab: str | None) -> pd.DataFrame:
+    """Collapse bench_ab.sh rounds to one row per (point, side): 'value' is the
+    min over rounds (what bench_ab.sh reports), 'value_max' the max, drawn as
+    the spread bar. Exits if the input still holds several A/B runs after the
+    --host / --ab filters, since plotting them together would be meaningless."""
+    if host is not None and "host" in df.columns:
+        df = df[df["host"] == host]
+    if ab is not None:
+        df = df[df["ab"] == ab]
+    runs = df[[c for c in ("host", "ab") if c in df.columns]].drop_duplicates()
+    if len(runs) != 1:
+        listing = "\n  ".join(" ".join(map(str, r)) for r in runs.itertuples(index=False))
+        raise SystemExit(f"input holds {len(runs)} A/B runs; pick one with "
+                         f"--host / --ab:\n  {listing}")
+    # Same ref on both sides (a flags-only A/B without meta.txt): keep them apart.
+    variants = df.groupby("side")["variant"].first()
+    if variants.nunique() < len(variants):
+        df = df.assign(variant=df["variant"] + " (" + df["side"] + ")")
+    return (df.groupby(POINT_KEYS + ["side", "variant"], as_index=False)
+              .agg(value=("value", "min"), value_max=("value", "max")))
+
+
+def _is_ab(df: pd.DataFrame) -> bool:
+    return "side" in df.columns
 
 
 def _format_time_ms(ms: float, _pos: int | None = None) -> str:
@@ -135,27 +214,58 @@ def _plot_grouped(sub: pd.DataFrame, *, x_col: str,
     color_values = sorted(sub[color_col].unique())
     impls = sorted(sub["implementation"].unique())
     palette = _color_palette(color_values)
+    # A/B input: one line per (color, impl, side), side drawn as line style.
+    sides = (sub[["side", "variant"]].drop_duplicates().sort_values("side")
+             .itertuples(index=False) if _is_ab(sub) else [(None, None)])
+    sides = list(sides)
 
     fig, ax = plt.subplots(figsize=(8, 5.5))
     for cv in color_values:
         for impl in impls:
-            g = sub[(sub[color_col] == cv) & (sub["implementation"] == impl)]
-            if g.empty:
-                continue
-            g = g.sort_values(x_col)
-            marker = IMPL_MARKERS.get(impl, "o")
-            ax.plot(g[x_col], g["value"],
-                    color=palette[cv],
-                    marker=marker,
-                    markersize=7, markeredgewidth=1.5,
-                    linewidth=1.4)
+            for side, _ in sides:
+                g = sub[(sub[color_col] == cv) & (sub["implementation"] == impl)]
+                if side is not None:
+                    g = g[g["side"] == side]
+                if g.empty:
+                    continue
+                g = g.sort_values(x_col)
+                style = {"color": palette[cv],
+                         "marker": IMPL_MARKERS.get(impl, "o"),
+                         "markersize": 7, "markeredgewidth": 1.5,
+                         "linewidth": 1.4,
+                         "linestyle": SIDE_LINESTYLES.get(side, "-")}
+                if side is None:
+                    ax.plot(g[x_col], g["value"], **style)
+                else:
+                    # Line through the min over rounds; bar up to the max.
+                    ax.errorbar(g[x_col], g["value"],
+                                yerr=[[0] * len(g), g["value_max"] - g["value"]],
+                                capsize=3, elinewidth=1, **style)
 
     _style_loglog(ax, xlabel, ylabel, title)
-    _draw_legend(ax, color_values, color_label, palette, impls)
+    _draw_legend(ax, color_values, color_label, palette, impls,
+                 [s for s in sides if s[0] is not None])
     _save(fig, out)
 
 
-def _draw_legend(ax, color_values, color_label, palette, impls):
+def _draw_legend(ax, color_values, color_label, palette, impls, sides=()):
+    side_handles = [Line2D([0], [0], color="black", linewidth=1.4,
+                           linestyle=SIDE_LINESTYLES[side],
+                           label=f"{side}: {variant}")
+                    for side, variant in sides]
+    _draw_series_legend(ax, color_values, color_label, palette, impls)
+    if side_handles:
+        # Below the axes: branch labels can be long (refs plus CXXFLAGS) and
+        # would cover data. It must be the axes' main legend, not an
+        # add_artist one, or savefig(bbox_inches="tight") crops it off.
+        ax.add_artist(ax.get_legend())
+        ax.legend(handles=side_handles, loc="upper center",
+                  bbox_to_anchor=(0.5, -0.12), frameon=False,
+                  title="line = min over rounds, bar = max")
+
+
+def _draw_series_legend(ax, color_values, color_label, palette, impls):
+    loc = "best"
     if color_label == "implementation":
         # Color already encodes impl; merge marker + color into one handle per impl.
         ax.legend(handles=[Line2D([0], [0], color=palette[v],
@@ -163,7 +273,7 @@ def _draw_legend(ax, color_values, color_label, palette, impls):
                                   linewidth=2, markersize=7,
                                   markeredgewidth=1.5, label=str(v))
                            for v in color_values],
-                  loc="best")
+                  loc=loc)
         return
     color_handles = [Line2D([0], [0], color=palette[v], linewidth=2,
                             label=f"{color_label}={int(v)}")
@@ -172,7 +282,7 @@ def _draw_legend(ax, color_values, color_label, palette, impls):
                            color="black", linestyle="none",
                            markersize=8, markeredgewidth=1.5, label=i)
                     for i in impls]
-    ax.legend(handles=color_handles + impl_handles, loc="best")
+    ax.legend(handles=color_handles + impl_handles, loc=loc)
 
 
 def _auto_pick(df: pd.DataFrame, col: str) -> int | None:
@@ -221,23 +331,25 @@ def plot_diff_vs_decode(df: pd.DataFrame, *, capacities: list[int] | None,
                   out=out)
 
 
-def plot_capacity_vs_decode_50pct(df: pd.DataFrame, *, bits: int,
-                                  out: Path,
-                                  title_suffix: str = "") -> None:
-    """Plot #2: decode time vs capacity, at errors = capacity/2.
+def plot_capacity_vs_decode_fill(df: pd.DataFrame, *, bits: int,
+                                 out: Path, fill_pct: int = 50,
+                                 title_suffix: str = "") -> None:
+    """Plot #2: decode time vs capacity, at errors = capacity * fill_pct/100
+    (50 for `bench --sweep`, 100 for the bench_ab.sh progression configs).
 
     Single dimension; color and marker both encode implementation."""
     sub = df[(df["metric"] == "recover[ms]") & (df["bits"] == bits)].copy()
-    sub = sub[sub["errors"] * 2 == sub["capacity"]]
+    sub = sub[sub["errors"] * 100 == sub["capacity"] * fill_pct]
     if sub.empty or sub["capacity"].nunique() < 2:
         _skip(out.name,
-              f"need recover[ms] at bits={bits} with errors == capacity/2 "
-              f"(try: ./bench --sweep --sweep-errors)")
+              f"need recover[ms] at bits={bits} with errors == "
+              f"{fill_pct}% of capacity at 2+ capacities"
+              + (" (try: ./bench --sweep --sweep-errors)" if fill_pct == 50 else ""))
         return
     _plot_grouped(sub, x_col="capacity",
                   color_col="implementation", color_label="implementation",
                   xlabel="Capacity", ylabel="Decode time",
-                  title=f"Decode time vs capacity (bits={bits}, 50% differences){title_suffix}",
+                  title=f"Decode time vs capacity (bits={bits}, {fill_pct}% differences){title_suffix}",
                   out=out)
 
 
@@ -388,15 +500,42 @@ def compute_stats(df: pd.DataFrame, *, bits: int,
     return _row_aligned_ratio(g_recover, recover[recover["implementation"] == "CLMUL"])
 
 
+def compute_ab_stats(df: pd.DataFrame, *, bits: int) -> None:
+    """A/B input: per point, the min-over-rounds of each side and A/B (>1 means
+    B is faster), plus each side's spread (max-min)/min as bench_ab.sh prints."""
+    df = df[df["bits"] == bits]
+    if df.empty:
+        print(f"compute_ab_stats: no rows at bits={bits}")
+        return
+    keys = POINT_KEYS
+    a = df[df["side"] == "A"].set_index(keys)
+    b = df[df["side"] == "B"].set_index(keys)
+    j = a.merge(b, left_index=True, right_index=True, suffixes=("_A", "_B")).reset_index()
+    print(f"\nA: {a['variant'].iloc[0]}\nB: {b['variant'].iloc[0]}")
+    print(f"bits={bits}  (A/B > 1 means B is faster)")
+    print(f"{'metric':14s} {'cap':>6s} {'err':>6s} {'impl':9s} "
+          f"{'A min':>10s} {'B min':>10s} {'A/B':>7s} {'sprA%':>6s} {'sprB%':>6s}")
+    for r in j.sort_values(["metric", "implementation", "capacity", "errors"]).itertuples():
+        spr_a = (r.value_max_A - r.value_A) / r.value_A * 100
+        spr_b = (r.value_max_B - r.value_B) / r.value_B * 100
+        print(f"{r.metric:14s} {r.capacity:6d} {r.errors:6d} {r.implementation:9s} "
+              f"{r.value_A:10.3f} {r.value_B:10.3f} {r.value_A / r.value_B:7.3f} "
+              f"{spr_a:6.1f} {spr_b:6.1f}")
+
+
 PLOT_REGISTRY = {
     "diff": ("diff.png",
              lambda df, args, bits, out: plot_diff_vs_decode(
                  df, capacities=args.fixed_capacity, bits=bits, out=out,
                  title_suffix=args.title_suffix)),
     "cap50": ("cap50.png",
-              lambda df, args, bits, out: plot_capacity_vs_decode_50pct(
-                  df, bits=bits, out=out,
+              lambda df, args, bits, out: plot_capacity_vs_decode_fill(
+                  df, bits=bits, out=out, fill_pct=50,
                   title_suffix=args.title_suffix)),
+    "cap100": ("cap100.png",
+               lambda df, args, bits, out: plot_capacity_vs_decode_fill(
+                   df, bits=bits, out=out, fill_pct=100,
+                   title_suffix=args.title_suffix)),
     "create": ("create.png",
                lambda df, args, bits, out: plot_capacity_vs_create(
                    df, bits=bits, errors=args.fixed_errors,
@@ -464,6 +603,14 @@ def main() -> None:
                         choices=list(PLOT_REGISTRY.keys()) + ["all","stats"],
                         default=["all"],
                         help="which plots to render (default: all)")
+    parser.add_argument("--host", default=None,
+                        help="A/B input: keep only this host's rows "
+                             "(all_rounds.tsv holds several hosts)")
+    parser.add_argument("--ab", default=None,
+                        help="A/B input: keep only this A/B run, e.g. "
+                             "12-cumulative-hf-o2fix (all_rounds.tsv holds "
+                             "several; for a rounds.tsv it is the directory "
+                             "name, e.g. i7_4770_ab_12-cumulative-hf-o2fix)")
     parser.add_argument("--title-suffix", default="",
                         metavar="TEXT",
                         help="text appended to every plot title "
@@ -472,8 +619,14 @@ def main() -> None:
 
     df = load_tsv(args.inputs)
     print(f"loaded {len(df)} rows from {len(args.inputs)} file(s)")
+    if _is_ab(df):
+        df = aggregate_ab(df, host=args.host, ab=args.ab)
 
     if "stats" in args.plots:
+        if _is_ab(df):
+            for bits in args.bits:
+                compute_ab_stats(df, bits=bits)
+            return
         for bits in args.bits:
             compute_stats(df, bits=bits,
                           capacities=args.fixed_capacity,

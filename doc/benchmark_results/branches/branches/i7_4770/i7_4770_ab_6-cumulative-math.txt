@@ -1,0 +1,22 @@
+Building A: test-additions
+Building B: general_math_speedup
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      4.461 (1.0%)          
+s128-e128-b64      B    -                      0.685 (1.8%)          
+s512-e512-b64      A    -                      63.019 (0.1%)         
+s512-e512-b64      B    -                      8.876 (2.6%)          
+s1024-e1024-b64    A    -                      242.430 (0.1%)        
+s1024-e1024-b64    B    -                      24.458 (1.0%)         
+s2048-e2048-b64    A    -                      941.111 (0.1%)        
+s2048-e2048-b64    B    -                      68.724 (1.1%)         
+s4096-e4096-b64    A    -                      3668.838 (0.1%)       
+s4096-e4096-b64    B    -                      205.654 (0.6%)        
+s1024-e1024-b32    A    -                      175.424 (0.1%)        
+s1024-e1024-b32    B    -                      16.759 (0.1%)         
+s4096-e4096-b32    A    -                      2538.396 (0.2%)       
+s4096-e4096-b32    B    -                      171.150 (0.7%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.

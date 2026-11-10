@@ -1,0 +1,15 @@
+config	side	ref	commit	implementation	min_ms	max_ms	spread_pct
+s128-e128-b64	A	test-additions	f7226980	CLMUL	4.46119	4.50633	1.01
+s128-e128-b64	B	general_math_speedup	40ad9d09	CLMUL	0.68546	0.69799	1.83
+s512-e512-b64	A	test-additions	f7226980	CLMUL	63.01861	63.05047	0.05
+s512-e512-b64	B	general_math_speedup	40ad9d09	CLMUL	8.87600	9.10501	2.58
+s1024-e1024-b64	A	test-additions	f7226980	CLMUL	242.42988	242.58753	0.07
+s1024-e1024-b64	B	general_math_speedup	40ad9d09	CLMUL	24.45818	24.69568	0.97
+s2048-e2048-b64	A	test-additions	f7226980	CLMUL	941.11090	942.19233	0.11
+s2048-e2048-b64	B	general_math_speedup	40ad9d09	CLMUL	68.72431	69.47144	1.09
+s4096-e4096-b64	A	test-additions	f7226980	CLMUL	3668.83806	3671.39717	0.07
+s4096-e4096-b64	B	general_math_speedup	40ad9d09	CLMUL	205.65375	206.97914	0.64
+s1024-e1024-b32	A	test-additions	f7226980	CLMUL	175.42375	175.65137	0.13
+s1024-e1024-b32	B	general_math_speedup	40ad9d09	CLMUL	16.75905	16.77963	0.12
+s4096-e4096-b32	A	test-additions	f7226980	CLMUL	2538.39648	2543.98660	0.22
+s4096-e4096-b32	B	general_math_speedup	40ad9d09	CLMUL	171.15031	172.28112	0.66

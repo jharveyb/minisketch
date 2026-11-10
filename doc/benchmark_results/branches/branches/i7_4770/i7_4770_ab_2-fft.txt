@@ -1,0 +1,22 @@
+Building A: fast-tracemod-reduce-allocs
+Building B: additive-fft
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      2.662 (2.1%)          
+s128-e128-b64      B    -                      2.715 (0.4%)          
+s512-e512-b64      A    -                      35.518 (1.8%)         
+s512-e512-b64      B    -                      26.727 (4.5%) NOISY   
+s1024-e1024-b64    A    -                      122.474 (1.6%)        
+s1024-e1024-b64    B    -                      75.821 (2.8%)         
+s2048-e2048-b64    A    -                      407.999 (2.8%)        
+s2048-e2048-b64    B    -                      202.829 (4.0%) NOISY  
+s4096-e4096-b64    A    -                      1360.527 (1.2%)       
+s4096-e4096-b64    B    -                      575.592 (2.9%)        
+s1024-e1024-b32    A    -                      83.438 (2.3%)         
+s1024-e1024-b32    B    -                      49.943 (3.4%) NOISY   
+s4096-e4096-b32    A    -                      909.757 (1.2%)        
+s4096-e4096-b32    B    -                      450.823 (1.2%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.

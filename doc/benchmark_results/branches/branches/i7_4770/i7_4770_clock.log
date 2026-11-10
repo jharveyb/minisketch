@@ -1,0 +1,56 @@
+--- 2026-10-20T16:05:28-04:00 after start
+cpu MHz		: 3392.534
+scaling_cur_freq 3392534
+temp 27800
+--- 2026-10-20T16:08:40-04:00 after 1-reducer
+cpu MHz		: 3400.000
+scaling_cur_freq 3400000
+temp 27800
+--- 2026-10-20T16:10:16-04:00 after 2-fft
+cpu MHz		: 3400.000
+scaling_cur_freq 3400000
+temp 27800
+--- 2026-10-20T16:11:28-04:00 after 3-gcd
+cpu MHz		: 3400.000
+scaling_cur_freq 3400000
+temp 27800
+--- 2026-10-20T16:14:16-04:00 after 4-cumulative
+cpu MHz		: 3391.991
+scaling_cur_freq 3391991
+temp 27800
+--- 2026-10-20T16:15:15-04:00 after 5-math
+cpu MHz		: 3400.000
+scaling_cur_freq 3400000
+temp 27800
+--- 2026-10-20T16:17:49-04:00 after 6-cumulative-math
+cpu MHz		: 3400.000
+scaling_cur_freq 3400000
+temp 27800
+--- 2026-10-20T16:18:28-04:00 after 7-math-target
+cpu MHz		: 3392.043
+scaling_cur_freq 3396296
+temp 27800
+--- 2026-10-20T16:18:55-04:00 after 8-table-cutoff-1024
+cpu MHz		: 3400.000
+scaling_cur_freq 3392054
+temp 27800
+--- 2026-10-20T16:19:38-04:00 after 9-math-vs-hf
+cpu MHz		: 3400.000
+scaling_cur_freq 3400000
+temp 27800
+--- 2026-10-20T16:22:10-04:00 after 10-cumulative-hf
+cpu MHz		: 3400.000
+scaling_cur_freq 3400000
+temp 27800
+--- 2026-10-20T16:45:06-04:00 after start
+cpu MHz		: 3392.892
+scaling_cur_freq 3392081
+temp 27800
+--- 2026-10-20T16:45:49-04:00 after 11-math-vs-hf-o2fix
+cpu MHz		: 3391.991
+scaling_cur_freq 3391991
+temp 27800
+--- 2026-10-20T16:48:22-04:00 after 12-cumulative-hf-o2fix
+cpu MHz		: 3392.495
+scaling_cur_freq 3392495
+temp 27800

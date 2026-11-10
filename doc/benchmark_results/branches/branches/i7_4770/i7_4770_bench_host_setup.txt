@@ -1,0 +1,8 @@
+Recorded current settings to /var/tmp/minisketch-bench-host.state
+
+fastest CPUs (pinned at 3400000 kHz): 0,1,2,3,4,5,6,7 -> BENCH_PREFIX="taskset -c 7"
+boost: 0
+cpus 0,1,2,3,4,5,6,7: governor performance, min 3400000 kHz, max 3400000 kHz, EPB 0
+
+Host pinned.
+After benchmarking: sudo tools/bench_host.sh restore

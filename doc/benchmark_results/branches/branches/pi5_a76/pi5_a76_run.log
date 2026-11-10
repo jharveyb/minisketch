@@ -1,0 +1,280 @@
+Recorded current settings to /var/tmp/minisketch-bench-host.state
+
+fastest CPUs (pinned at 2400000 kHz): 0,1,2,3 -> BENCH_PREFIX="taskset -c 3"
+boost: not supported
+cpus 0,1,2,3: governor performance, min 2400000 kHz, max 2400000 kHz
+vcgencmd: throttled=0x0 temp=50.5'C
+
+Host pinned.
+After benchmarking: sudo tools/bench_host.sh restore
+=== 2026-10-20T21:05:27+01:00 1-reducer: test-additions -> fast-tracemod-reduce-allocs
+Building A: test-additions
+Building B: fast-tracemod-reduce-allocs
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      7.932 (1.5%)          
+s128-e128-b64      B    -                      4.415 (1.0%)          
+s512-e512-b64      A    -                      115.313 (0.3%)        
+s512-e512-b64      B    -                      60.470 (0.3%)         
+s1024-e1024-b64    A    -                      446.389 (0.3%)        
+s1024-e1024-b64    B    -                      206.955 (3.4%) NOISY  
+s2048-e2048-b64    A    -                      1739.293 (0.2%)       
+s2048-e2048-b64    B    -                      698.533 (2.6%)        
+s4096-e4096-b64    A    -                      6801.053 (0.2%)       
+s4096-e4096-b64    B    -                      2294.276 (1.7%)       
+s1024-e1024-b32    A    -                      120.747 (0.1%)        
+s1024-e1024-b32    B    -                      65.598 (1.8%)         
+s4096-e4096-b32    A    -                      1732.921 (0.2%)       
+s4096-e4096-b32    B    -                      733.453 (1.7%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:10:02+01:00 2-fft: fast-tracemod-reduce-allocs -> additive-fft
+Building A: fast-tracemod-reduce-allocs
+Building B: additive-fft
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      4.429 (1.3%)          
+s128-e128-b64      B    -                      4.493 (1.4%)          
+s512-e512-b64      A    -                      60.516 (0.2%)         
+s512-e512-b64      B    -                      38.938 (18.0%) NOISY  
+s1024-e1024-b64    A    -                      206.797 (3.2%) NOISY  
+s1024-e1024-b64    B    -                      122.562 (5.2%) NOISY  
+s2048-e2048-b64    A    -                      692.397 (4.0%) NOISY  
+s2048-e2048-b64    B    -                      340.637 (3.3%) NOISY  
+s4096-e4096-b64    A    -                      2289.229 (1.9%)       
+s4096-e4096-b64    B    -                      955.479 (1.8%)        
+s1024-e1024-b32    A    -                      65.696 (1.7%)         
+s1024-e1024-b32    B    -                      43.073 (6.8%) NOISY   
+s4096-e4096-b32    A    -                      731.626 (1.2%)        
+s4096-e4096-b32    B    -                      383.357 (0.4%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:12:18+01:00 3-gcd: additive-fft -> subquadratic-gcd
+Building A: additive-fft
+Building B: subquadratic-gcd
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      4.519 (0.8%)          
+s128-e128-b64      B    -                      4.487 (1.5%)          
+s512-e512-b64      A    -                      38.897 (17.0%) NOISY  
+s512-e512-b64      B    -                      38.588 (17.8%) NOISY  
+s1024-e1024-b64    A    -                      118.804 (7.2%) NOISY  
+s1024-e1024-b64    B    -                      122.093 (4.6%) NOISY  
+s2048-e2048-b64    A    -                      342.132 (1.6%)        
+s2048-e2048-b64    B    -                      330.994 (6.1%) NOISY  
+s4096-e4096-b64    A    -                      948.275 (3.4%) NOISY  
+s4096-e4096-b64    B    -                      878.867 (6.7%) NOISY  
+s1024-e1024-b32    A    -                      44.652 (3.1%) NOISY   
+s1024-e1024-b32    B    -                      42.946 (5.4%) NOISY   
+s4096-e4096-b32    A    -                      382.146 (2.4%)        
+s4096-e4096-b32    B    -                      369.182 (2.6%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:14:01+01:00 4-cumulative: test-additions -> subquadratic-gcd
+Building A: test-additions
+Building B: subquadratic-gcd
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      7.927 (1.4%)          
+s128-e128-b64      B    -                      4.485 (1.0%)          
+s512-e512-b64      A    -                      115.429 (0.1%)        
+s512-e512-b64      B    -                      43.760 (3.4%) NOISY   
+s1024-e1024-b64    A    -                      446.383 (0.2%)        
+s1024-e1024-b64    B    -                      122.153 (5.8%) NOISY  
+s2048-e2048-b64    A    -                      1739.236 (0.2%)       
+s2048-e2048-b64    B    -                      342.279 (2.7%)        
+s4096-e4096-b64    A    -                      6801.795 (0.2%)       
+s4096-e4096-b64    B    -                      890.767 (3.3%) NOISY  
+s1024-e1024-b32    A    -                      120.700 (0.1%)        
+s1024-e1024-b32    B    -                      43.659 (4.1%) NOISY   
+s4096-e4096-b32    A    -                      1733.165 (0.2%)       
+s4096-e4096-b32    B    -                      366.332 (2.6%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:18:02+01:00 5-math: subquadratic-gcd -> general_math_speedup
+Building A: subquadratic-gcd
+Building B: general_math_speedup
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      4.494 (1.0%)          
+s128-e128-b64      B    -                      0.896 (2.2%)          
+s512-e512-b64      A    -                      38.514 (18.2%) NOISY  
+s512-e512-b64      B    -                      10.312 (0.7%)         
+s1024-e1024-b64    A    -                      121.914 (4.3%) NOISY  
+s1024-e1024-b64    B    -                      36.032 (0.3%)         
+s2048-e2048-b64    A    -                      342.307 (3.3%) NOISY  
+s2048-e2048-b64    B    -                      97.319 (1.0%)         
+s4096-e4096-b64    A    -                      899.267 (3.1%) NOISY  
+s4096-e4096-b64    B    -                      286.737 (0.8%)        
+s1024-e1024-b32    A    -                      44.280 (1.6%)         
+s1024-e1024-b32    B    -                      17.538 (0.4%)         
+s4096-e4096-b32    A    -                      363.038 (4.5%) NOISY  
+s4096-e4096-b32    B    -                      169.350 (1.4%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:19:26+01:00 6-cumulative-math: test-additions -> general_math_speedup
+Building A: test-additions
+Building B: general_math_speedup
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      7.922 (1.8%)          
+s128-e128-b64      B    -                      0.896 (2.0%)          
+s512-e512-b64      A    -                      115.329 (0.2%)        
+s512-e512-b64      B    -                      10.315 (1.0%)         
+s1024-e1024-b64    A    -                      446.601 (0.3%)        
+s1024-e1024-b64    B    -                      35.939 (0.4%)         
+s2048-e2048-b64    A    -                      1739.369 (0.2%)       
+s2048-e2048-b64    B    -                      97.692 (0.3%)         
+s4096-e4096-b64    A    -                      6807.739 (0.1%)       
+s4096-e4096-b64    B    -                      286.917 (0.5%)        
+s1024-e1024-b32    A    -                      120.709 (0.1%)        
+s1024-e1024-b32    B    -                      17.563 (0.3%)         
+s4096-e4096-b32    A    -                      1733.815 (0.2%)       
+s4096-e4096-b32    B    -                      169.120 (0.9%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:23:08+01:00 7-math-target: subquadratic-gcd -> general_math_speedup
+Building A: subquadratic-gcd
+Building B: general_math_speedup
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s1024-e32-b64      A    -                      0.585 (1.2%)          
+s1024-e32-b64      B    -                      0.108 (2.0%)          
+s1024-e64-b64      A    -                      1.678 (1.0%)          
+s1024-e64-b64      B    -                      0.309 (1.7%)          
+s1024-e128-b64     A    -                      5.351 (1.1%)          
+s1024-e128-b64     B    -                      0.984 (1.1%)          
+s1024-e256-b64     A    -                      15.092 (0.7%)         
+s1024-e256-b64     B    -                      3.128 (0.6%)          
+s2048-e64-b64      A    -                      2.177 (0.7%)          
+s2048-e64-b64      B    -                      0.362 (1.0%)          
+s2048-e256-b64     A    -                      17.015 (1.1%)         
+s2048-e256-b64     B    -                      3.217 (1.3%)          
+s4096-e32-b64      A    -                      1.336 (1.2%)          
+s4096-e32-b64      B    -                      0.175 (1.3%)          
+s4096-e64-b64      A    -                      3.172 (0.3%)          
+s4096-e64-b64      B    -                      0.460 (3.7%) NOISY    
+s4096-e128-b64     A    -                      8.288 (0.6%)          
+s4096-e128-b64     B    -                      1.205 (2.3%)          
+s4096-e256-b64     A    -                      20.997 (0.4%)         
+s4096-e256-b64     B    -                      3.482 (0.8%)          
+s8192-e64-b64      A    -                      5.167 (0.2%)          
+s8192-e64-b64      B    -                      0.660 (1.4%)          
+s8192-e256-b64     A    -                      28.784 (0.7%)         
+s8192-e256-b64     B    -                      3.954 (0.7%)          
+s1024-e512-b64     A    -                      40.455 (18.0%) NOISY  
+s1024-e512-b64     B    -                      10.836 (0.8%)         
+s1024-e768-b64     A    -                      83.788 (0.5%)         
+s1024-e768-b64     B    -                      29.980 (0.3%)         
+s4096-e2048-b64    A    -                      371.735 (3.4%) NOISY  
+s4096-e2048-b64    B    -                      100.369 (0.5%)        
+s4096-e3072-b64    A    -                      615.927 (0.3%)        
+s4096-e3072-b64    B    -                      208.282 (0.6%)        
+s1024-e64-b32      A    -                      0.693 (0.6%)          
+s1024-e64-b32      B    -                      0.197 (1.8%)          
+s1024-e256-b32     A    -                      5.517 (0.6%)          
+s1024-e256-b32     B    -                      1.696 (1.4%)          
+s4096-e256-b32     A    -                      9.125 (0.4%)          
+s4096-e256-b32     B    -                      2.075 (0.8%)          
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:24:10+01:00 8-table-cutoff-1024: general_math_speedup -> general_math_speedup
+Building A: general_math_speedup
+Building B: general_math_speedup (-DMINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF=1024)
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s1024-e512-b64     A    -                      10.861 (0.7%)         
+s1024-e512-b64     B    -                      10.825 (1.1%)         
+s1024-e720-b64     A    -                      28.708 (1.2%)         
+s1024-e720-b64     B    -                      19.802 (0.4%)         
+s1024-e768-b64     A    -                      29.942 (0.5%)         
+s1024-e768-b64     B    -                      22.829 (1.3%)         
+s1024-e832-b64     A    -                      31.520 (0.5%)         
+s1024-e832-b64     B    -                      26.426 (1.1%)         
+s1024-e896-b64     A    -                      33.252 (0.3%)         
+s1024-e896-b64     B    -                      30.318 (1.9%)         
+s1024-e960-b64     A    -                      34.926 (0.4%)         
+s1024-e960-b64     B    -                      34.805 (1.8%)         
+s1024-e1000-b64    A    -                      36.049 (0.4%)         
+s1024-e1000-b64    B    -                      37.512 (1.5%)         
+s2048-e1000-b64    A    -                      36.072 (0.5%)         
+s2048-e1000-b64    B    -                      37.653 (2.2%)         
+s1024-e768-b32     A    -                      13.638 (0.7%)         
+s1024-e768-b32     B    -                      11.910 (0.7%)         
+s1024-e1000-b32    A    -                      17.637 (0.8%)         
+s1024-e1000-b32    B    -                      19.408 (0.7%)         
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:24:51+01:00 9-math-vs-hf: general_math_speedup -> worktree-high-fill-decode
+Building A: general_math_speedup
+Building B: worktree-high-fill-decode
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      0.895 (3.0%) NOISY    
+s128-e128-b64      B    -                      1.688 (2.2%)          
+s512-e512-b64      A    -                      10.299 (0.9%)         
+s512-e512-b64      B    -                      18.363 (7.0%) NOISY   
+s1024-e1024-b64    A    -                      35.892 (0.6%)         
+s1024-e1024-b64    B    -                      49.009 (4.5%) NOISY   
+s2048-e2048-b64    A    -                      97.733 (0.6%)         
+s2048-e2048-b64    B    -                      142.963 (9.2%) NOISY  
+s4096-e4096-b64    A    -                      287.880 (0.5%)        
+s4096-e4096-b64    B    -                      442.885 (8.8%) NOISY  
+s1024-e1024-b32    A    -                      17.572 (0.5%)         
+s1024-e1024-b32    B    -                      9.768 (5.4%) NOISY    
+s4096-e4096-b32    A    -                      169.338 (1.0%)        
+s4096-e4096-b32    B    -                      86.907 (12.5%) NOISY  
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:26:03+01:00 10-cumulative-hf: test-additions -> worktree-high-fill-decode
+Building A: test-additions
+Building B: worktree-high-fill-decode
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      7.983 (0.6%)          
+s128-e128-b64      B    -                      1.690 (1.5%)          
+s512-e512-b64      A    -                      115.331 (0.2%)        
+s512-e512-b64      B    -                      18.485 (5.5%) NOISY   
+s1024-e1024-b64    A    -                      446.367 (0.2%)        
+s1024-e1024-b64    B    -                      49.249 (4.5%) NOISY   
+s2048-e2048-b64    A    -                      1741.029 (0.1%)       
+s2048-e2048-b64    B    -                      146.927 (1.9%)        
+s4096-e4096-b64    A    -                      6806.649 (0.1%)       
+s4096-e4096-b64    B    -                      443.004 (1.7%)        
+s1024-e1024-b32    A    -                      120.747 (0.1%)        
+s1024-e1024-b32    B    -                      9.978 (3.2%) NOISY    
+s4096-e4096-b32    A    -                      1733.409 (0.2%)       
+s4096-e4096-b32    B    -                      89.379 (2.8%)         
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.
+=== 2026-10-20T21:29:51+01:00 all done
+warning: cpupower -c 0,1,2,3 frequency-set -d 1500000 -u 2400000 failed: Setting cpu: 0 Setting cpu: 1 Error setting new values. Common errors: - Do you have proper administration rights? (super-user?) - Is the governor you requested available and modprobed? - Trying to set an invalid policy? - Trying to set a specific frequency, but userspace governor is not available,    for example because of hardware which cannot be set to a specific frequency    or because the userspace governor isn't loaded?
+boost: not supported
+cpus 0,1,2,3: governor ondemand, min 1500000 kHz, max 2400000 kHz
+vcgencmd: throttled=0x0 temp=59.8'C
+
+Restored with 1 warning(s) (state kept as /var/tmp/minisketch-bench-host.state.restored).
+verify: fixed 0 setting(s) via sysfs
+boost: not supported
+cpus 0,1,2,3: governor ondemand, min 1500000 kHz, max 2400000 kHz
+vcgencmd: throttled=0x0 temp=59.8'C

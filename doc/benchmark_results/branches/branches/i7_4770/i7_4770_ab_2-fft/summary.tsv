@@ -1,0 +1,15 @@
+config	side	ref	commit	implementation	min_ms	max_ms	spread_pct
+s128-e128-b64	A	fast-tracemod-reduce-allocs	296da76a	CLMUL	2.66203	2.71902	2.14
+s128-e128-b64	B	additive-fft	8f1e7ccc	CLMUL	2.71477	2.72677	0.44
+s512-e512-b64	A	fast-tracemod-reduce-allocs	296da76a	CLMUL	35.51767	36.16940	1.83
+s512-e512-b64	B	additive-fft	8f1e7ccc	CLMUL	26.72682	27.91750	4.46
+s1024-e1024-b64	A	fast-tracemod-reduce-allocs	296da76a	CLMUL	122.47369	124.40350	1.58
+s1024-e1024-b64	B	additive-fft	8f1e7ccc	CLMUL	75.82052	77.94405	2.80
+s2048-e2048-b64	A	fast-tracemod-reduce-allocs	296da76a	CLMUL	407.99947	419.24579	2.76
+s2048-e2048-b64	B	additive-fft	8f1e7ccc	CLMUL	202.82945	210.95590	4.01
+s4096-e4096-b64	A	fast-tracemod-reduce-allocs	296da76a	CLMUL	1360.52727	1376.60160	1.18
+s4096-e4096-b64	B	additive-fft	8f1e7ccc	CLMUL	575.59222	592.03679	2.86
+s1024-e1024-b32	A	fast-tracemod-reduce-allocs	296da76a	CLMUL	83.43756	85.34819	2.29
+s1024-e1024-b32	B	additive-fft	8f1e7ccc	CLMUL	49.94269	51.63611	3.39
+s4096-e4096-b32	A	fast-tracemod-reduce-allocs	296da76a	CLMUL	909.75686	921.06505	1.24
+s4096-e4096-b32	B	additive-fft	8f1e7ccc	CLMUL	450.82291	456.17277	1.19

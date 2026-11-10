@@ -1,0 +1,11 @@
+host: raspberrypi5 (aarch64), 2026-10-20T21:05:48+01:00
+cpu: Cortex-A76
+A: test-additions (f7226980)
+B: fast-tracemod-reduce-allocs (296da76a)
+configs: 128 128 7 64|512 512 7 64|1024 1024 5 64|2048 2048 3 64|4096 4096 3 64|1024 1024 5 32|4096 4096 3 32
+runs: 5, fields: 32;64, impl: 1, bench prefix: taskset -c 3, flags: -g -O2
+cpu0: governor performance min 2400000 max 2400000 kHz
+cpu1: governor performance min 2400000 max 2400000 kHz
+cpu2: governor performance min 2400000 max 2400000 kHz
+cpu3: governor performance min 2400000 max 2400000 kHz
+cpufreq boost: 0

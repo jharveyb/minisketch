@@ -1,0 +1,11 @@
+host: raspberrypi5 (aarch64), 2026-10-20T21:23:37+01:00
+cpu: Cortex-A76
+A: subquadratic-gcd (9b0ee528)
+B: general_math_speedup (40ad9d09)
+configs: 1024 32 30 64|1024 64 20 64|1024 128 10 64|1024 256 7 64|2048 64 15 64|2048 256 5 64|4096 32 15 64|4096 64 10 64|4096 128 7 64|4096 256 5 64|8192 64 7 64|8192 256 4 64|1024 512 4 64|1024 768 3 64|4096 2048 2 64|4096 3072 2 64|1024 64 20 32|1024 256 7 32|4096 256 5 32
+runs: 5, fields: 32;64, impl: 1, bench prefix: taskset -c 3, flags: -g -O2
+cpu0: governor performance min 2400000 max 2400000 kHz
+cpu1: governor performance min 2400000 max 2400000 kHz
+cpu2: governor performance min 2400000 max 2400000 kHz
+cpu3: governor performance min 2400000 max 2400000 kHz
+cpufreq boost: 0

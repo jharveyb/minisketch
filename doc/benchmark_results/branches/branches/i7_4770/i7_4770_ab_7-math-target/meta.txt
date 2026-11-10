@@ -1,0 +1,15 @@
+host: xps-jhb-benchbox (x86_64), 2026-10-20T16:18:07-04:00
+cpu: Intel(R) Core(TM) i7-4770 CPU @ 3.40GHz
+A: subquadratic-gcd (9b0ee528)
+B: general_math_speedup (40ad9d09)
+configs: 1024 32 30 64|1024 64 20 64|1024 128 10 64|1024 256 7 64|2048 64 15 64|2048 256 5 64|4096 32 15 64|4096 64 10 64|4096 128 7 64|4096 256 5 64|8192 64 7 64|8192 256 4 64|1024 512 4 64|1024 768 3 64|4096 2048 2 64|4096 3072 2 64|1024 64 20 32|1024 256 7 32|4096 256 5 32
+runs: 5, fields: 32;64, impl: 1, bench prefix: taskset -c 7, flags: -g -O2
+cpu0: governor performance min 3400000 max 3400000 kHz
+cpu1: governor performance min 3400000 max 3400000 kHz
+cpu2: governor performance min 3400000 max 3400000 kHz
+cpu3: governor performance min 3400000 max 3400000 kHz
+cpu4: governor performance min 3400000 max 3400000 kHz
+cpu5: governor performance min 3400000 max 3400000 kHz
+cpu6: governor performance min 3400000 max 3400000 kHz
+cpu7: governor performance min 3400000 max 3400000 kHz
+intel no_turbo: 1

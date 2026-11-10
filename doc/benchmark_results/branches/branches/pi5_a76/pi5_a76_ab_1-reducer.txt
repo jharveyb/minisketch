@@ -1,0 +1,22 @@
+Building A: test-additions
+Building B: fast-tracemod-reduce-allocs
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      7.932 (1.5%)          
+s128-e128-b64      B    -                      4.415 (1.0%)          
+s512-e512-b64      A    -                      115.313 (0.3%)        
+s512-e512-b64      B    -                      60.470 (0.3%)         
+s1024-e1024-b64    A    -                      446.389 (0.3%)        
+s1024-e1024-b64    B    -                      206.955 (3.4%) NOISY  
+s2048-e2048-b64    A    -                      1739.293 (0.2%)       
+s2048-e2048-b64    B    -                      698.533 (2.6%)        
+s4096-e4096-b64    A    -                      6801.053 (0.2%)       
+s4096-e4096-b64    B    -                      2294.276 (1.7%)       
+s1024-e1024-b32    A    -                      120.747 (0.1%)        
+s1024-e1024-b32    B    -                      65.598 (1.8%)         
+s4096-e4096-b32    A    -                      1732.921 (0.2%)       
+s4096-e4096-b32    B    -                      733.453 (1.7%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.

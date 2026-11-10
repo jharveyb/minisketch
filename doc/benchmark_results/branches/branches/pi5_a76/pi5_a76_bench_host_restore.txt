@@ -1,0 +1,10 @@
+warning: cpupower -c 0,1,2,3 frequency-set -d 1500000 -u 2400000 failed: Setting cpu: 0 Setting cpu: 1 Error setting new values. Common errors: - Do you have proper administration rights? (super-user?) - Is the governor you requested available and modprobed? - Trying to set an invalid policy? - Trying to set a specific frequency, but userspace governor is not available,    for example because of hardware which cannot be set to a specific frequency    or because the userspace governor isn't loaded?
+boost: not supported
+cpus 0,1,2,3: governor ondemand, min 1500000 kHz, max 2400000 kHz
+vcgencmd: throttled=0x0 temp=59.8'C
+
+Restored with 1 warning(s) (state kept as /var/tmp/minisketch-bench-host.state.restored).
+verify: fixed 0 setting(s) via sysfs
+boost: not supported
+cpus 0,1,2,3: governor ondemand, min 1500000 kHz, max 2400000 kHz
+vcgencmd: throttled=0x0 temp=60.4'C

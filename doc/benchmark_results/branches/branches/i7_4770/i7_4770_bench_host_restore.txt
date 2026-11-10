@@ -1,0 +1,8 @@
+warning: cpupower -c 0,1,2,3,4,5,6,7 frequency-set -d 800000 -u 3900000 failed: Setting cpu: 0 Setting cpu: 1 Error setting new values. Common errors: - Do you have proper administration rights? (super-user?) - Is the governor you requested available and modprobed? - Trying to set an invalid policy? - Trying to set a specific frequency, but userspace governor is not available,    for example because of hardware which cannot be set to a specific frequency    or because the userspace governor isn't loaded?
+boost: 1
+cpus 0,1,2,3,4,5,6,7: governor schedutil, min 800000 kHz, max 3900000 kHz, EPB 6
+
+Restored with 1 warning(s) (state kept as /var/tmp/minisketch-bench-host.state.restored).
+verify: fixed 0 setting(s) via sysfs
+boost: 1
+cpus 0,1,2,3,4,5,6,7: governor schedutil, min 800000 kHz, max 3900000 kHz, EPB 6

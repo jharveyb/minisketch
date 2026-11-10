@@ -1,0 +1,28 @@
+Building A: general_math_speedup
+Building B: general_math_speedup (-DMINISKETCH_TRACEMOD_FFT_TABLE_CUTOFF=1024)
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s1024-e512-b64     A    -                      9.210 (2.7%)          
+s1024-e512-b64     B    -                      9.219 (2.3%)          
+s1024-e720-b64     A    -                      19.000 (0.4%)         
+s1024-e720-b64     B    -                      17.341 (0.8%)         
+s1024-e768-b64     A    -                      19.864 (0.4%)         
+s1024-e768-b64     B    -                      19.174 (2.7%)         
+s1024-e832-b64     A    -                      20.998 (0.6%)         
+s1024-e832-b64     B    -                      22.372 (1.4%)         
+s1024-e896-b64     A    -                      22.218 (0.5%)         
+s1024-e896-b64     B    -                      25.599 (4.2%) NOISY   
+s1024-e960-b64     A    -                      23.694 (0.3%)         
+s1024-e960-b64     B    -                      30.265 (1.3%)         
+s1024-e1000-b64    A    -                      24.511 (1.0%)         
+s1024-e1000-b64    B    -                      32.657 (0.5%)         
+s2048-e1000-b64    A    -                      24.474 (1.0%)         
+s2048-e1000-b64    B    -                      32.719 (1.8%)         
+s1024-e768-b32     A    -                      12.684 (0.3%)         
+s1024-e768-b32     B    -                      13.507 (0.6%)         
+s1024-e1000-b32    A    -                      16.778 (0.4%)         
+s1024-e1000-b32    B    -                      22.370 (0.4%)         
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.

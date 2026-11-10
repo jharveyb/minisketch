@@ -1,0 +1,22 @@
+Building A: general_math_speedup
+Building B: worktree-high-fill-decode
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      0.895 (3.0%) NOISY    
+s128-e128-b64      B    -                      1.688 (2.2%)          
+s512-e512-b64      A    -                      10.299 (0.9%)         
+s512-e512-b64      B    -                      18.363 (7.0%) NOISY   
+s1024-e1024-b64    A    -                      35.892 (0.6%)         
+s1024-e1024-b64    B    -                      49.009 (4.5%) NOISY   
+s2048-e2048-b64    A    -                      97.733 (0.6%)         
+s2048-e2048-b64    B    -                      142.963 (9.2%) NOISY  
+s4096-e4096-b64    A    -                      287.880 (0.5%)        
+s4096-e4096-b64    B    -                      442.885 (8.8%) NOISY  
+s1024-e1024-b32    A    -                      17.572 (0.5%)         
+s1024-e1024-b32    B    -                      9.768 (5.4%) NOISY    
+s4096-e4096-b32    A    -                      169.338 (1.0%)        
+s4096-e4096-b32    B    -                      86.907 (12.5%) NOISY  
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.

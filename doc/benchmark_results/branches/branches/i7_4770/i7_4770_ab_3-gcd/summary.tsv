@@ -1,0 +1,15 @@
+config	side	ref	commit	implementation	min_ms	max_ms	spread_pct
+s128-e128-b64	A	additive-fft	8f1e7ccc	CLMUL	2.66708	2.73722	2.63
+s128-e128-b64	B	subquadratic-gcd	9b0ee528	CLMUL	2.64847	2.73559	3.29
+s512-e512-b64	A	additive-fft	8f1e7ccc	CLMUL	24.16456	27.90012	15.46
+s512-e512-b64	B	subquadratic-gcd	9b0ee528	CLMUL	26.44660	27.95147	5.69
+s1024-e1024-b64	A	additive-fft	8f1e7ccc	CLMUL	74.23132	78.75637	6.10
+s1024-e1024-b64	B	subquadratic-gcd	9b0ee528	CLMUL	73.04146	77.94948	6.72
+s2048-e2048-b64	A	additive-fft	8f1e7ccc	CLMUL	205.91735	217.23220	5.49
+s2048-e2048-b64	B	subquadratic-gcd	9b0ee528	CLMUL	210.56685	217.94140	3.50
+s4096-e4096-b64	A	additive-fft	8f1e7ccc	CLMUL	578.28403	590.50037	2.11
+s4096-e4096-b64	B	subquadratic-gcd	9b0ee528	CLMUL	557.43908	575.01987	3.15
+s1024-e1024-b32	A	additive-fft	8f1e7ccc	CLMUL	48.71538	51.48802	5.69
+s1024-e1024-b32	B	subquadratic-gcd	9b0ee528	CLMUL	51.05580	51.75964	1.38
+s4096-e4096-b32	A	additive-fft	8f1e7ccc	CLMUL	448.91781	460.89353	2.67
+s4096-e4096-b32	B	subquadratic-gcd	9b0ee528	CLMUL	395.74931	403.85264	2.05

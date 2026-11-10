@@ -1,0 +1,22 @@
+Building A: additive-fft
+Building B: subquadratic-gcd
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      4.519 (0.8%)          
+s128-e128-b64      B    -                      4.487 (1.5%)          
+s512-e512-b64      A    -                      38.897 (17.0%) NOISY  
+s512-e512-b64      B    -                      38.588 (17.8%) NOISY  
+s1024-e1024-b64    A    -                      118.804 (7.2%) NOISY  
+s1024-e1024-b64    B    -                      122.093 (4.6%) NOISY  
+s2048-e2048-b64    A    -                      342.132 (1.6%)        
+s2048-e2048-b64    B    -                      330.994 (6.1%) NOISY  
+s4096-e4096-b64    A    -                      948.275 (3.4%) NOISY  
+s4096-e4096-b64    B    -                      878.867 (6.7%) NOISY  
+s1024-e1024-b32    A    -                      44.652 (3.1%) NOISY   
+s1024-e1024-b32    B    -                      42.946 (5.4%) NOISY   
+s4096-e4096-b32    A    -                      382.146 (2.4%)        
+s4096-e4096-b32    B    -                      369.182 (2.6%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.

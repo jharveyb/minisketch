@@ -1,0 +1,56 @@
+--- 2026-10-20T21:05:27+01:00 after start
+scaling_cur_freq 2400000
+temp 50150
+throttled=0x0
+--- 2026-10-20T21:10:02+01:00 after 1-reducer
+scaling_cur_freq 2400000
+temp 59500
+throttled=0x0
+--- 2026-10-20T21:12:18+01:00 after 2-fft
+scaling_cur_freq 2400000
+temp 58950
+throttled=0x0
+--- 2026-10-20T21:14:01+01:00 after 3-gcd
+scaling_cur_freq 2400000
+temp 59500
+throttled=0x0
+--- 2026-10-20T21:18:02+01:00 after 4-cumulative
+scaling_cur_freq 2400000
+temp 60050
+throttled=0x0
+--- 2026-10-20T21:19:26+01:00 after 5-math
+scaling_cur_freq 2400000
+temp 59500
+throttled=0x0
+--- 2026-10-20T21:23:08+01:00 after 6-cumulative-math
+scaling_cur_freq 2400000
+temp 60600
+throttled=0x0
+--- 2026-10-20T21:24:10+01:00 after 7-math-target
+scaling_cur_freq 2400000
+temp 60050
+throttled=0x0
+--- 2026-10-20T21:24:51+01:00 after 8-table-cutoff-1024
+scaling_cur_freq 2400000
+temp 61700
+throttled=0x0
+--- 2026-10-20T21:26:03+01:00 after 9-math-vs-hf
+scaling_cur_freq 2400000
+temp 59500
+throttled=0x0
+--- 2026-10-20T21:29:51+01:00 after 10-cumulative-hf
+scaling_cur_freq 2400000
+temp 60050
+throttled=0x0
+--- 2026-10-20T21:45:05+01:00 after start
+scaling_cur_freq 2400000
+temp 54000
+throttled=0x0
+--- 2026-10-20T21:46:05+01:00 after 11-math-vs-hf-o2fix
+scaling_cur_freq 2400000
+temp 60600
+throttled=0x0
+--- 2026-10-20T21:49:42+01:00 after 12-cumulative-hf-o2fix
+scaling_cur_freq 2400000
+temp 59500
+throttled=0x0

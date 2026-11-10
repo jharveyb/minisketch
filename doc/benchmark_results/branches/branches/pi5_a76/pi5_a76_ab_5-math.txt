@@ -1,0 +1,22 @@
+Building A: subquadratic-gcd
+Building B: general_math_speedup
+Measuring: 5 alternating rounds per config; keep the machine idle.
+
+config             side impl0 min (spread%)    impl1 min (spread%)   
+s128-e128-b64      A    -                      4.494 (1.0%)          
+s128-e128-b64      B    -                      0.896 (2.2%)          
+s512-e512-b64      A    -                      38.514 (18.2%) NOISY  
+s512-e512-b64      B    -                      10.312 (0.7%)         
+s1024-e1024-b64    A    -                      121.914 (4.3%) NOISY  
+s1024-e1024-b64    B    -                      36.032 (0.3%)         
+s2048-e2048-b64    A    -                      342.307 (3.3%) NOISY  
+s2048-e2048-b64    B    -                      97.319 (1.0%)         
+s4096-e4096-b64    A    -                      899.267 (3.1%) NOISY  
+s4096-e4096-b64    B    -                      286.737 (0.8%)        
+s1024-e1024-b32    A    -                      44.280 (1.6%)         
+s1024-e1024-b32    B    -                      17.538 (0.4%)         
+s4096-e4096-b32    A    -                      363.038 (4.5%) NOISY  
+s4096-e4096-b32    B    -                      169.350 (1.4%)        
+
+min over 5 alternating rounds per side; spread = (max-min)/min of the
+per-round values. Trust a delta only if it exceeds both sides' spreads.

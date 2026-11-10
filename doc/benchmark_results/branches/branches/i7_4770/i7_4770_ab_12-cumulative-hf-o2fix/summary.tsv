@@ -1,0 +1,15 @@
+config	side	ref	commit	implementation	min_ms	max_ms	spread_pct
+s128-e128-b64	A	test-additions	f72269809	CLMUL	4.46303	4.51673	1.20
+s128-e128-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	0.66973	0.69201	3.33
+s512-e512-b64	A	test-additions	f72269809	CLMUL	63.00281	63.25699	0.40
+s512-e512-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	3.82512	4.05351	5.97
+s1024-e1024-b64	A	test-additions	f72269809	CLMUL	242.40390	242.56510	0.07
+s1024-e1024-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	10.15629	10.38918	2.29
+s2048-e2048-b64	A	test-additions	f72269809	CLMUL	940.89439	941.75475	0.09
+s2048-e2048-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	29.44269	31.72208	7.74
+s4096-e4096-b64	A	test-additions	f72269809	CLMUL	3669.01254	3670.81759	0.05
+s4096-e4096-b64	B	worktree-high-fill-decode	404de9bf9	CLMUL	86.26205	97.01855	12.47
+s1024-e1024-b32	A	test-additions	f72269809	CLMUL	175.42528	175.55778	0.08
+s1024-e1024-b32	B	worktree-high-fill-decode	404de9bf9	CLMUL	11.13086	11.33534	1.84
+s4096-e4096-b32	A	test-additions	f72269809	CLMUL	2538.41615	2542.93717	0.18
+s4096-e4096-b32	B	worktree-high-fill-decode	404de9bf9	CLMUL	103.79008	112.95061	8.83
